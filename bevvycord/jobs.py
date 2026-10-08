@@ -69,7 +69,7 @@ class Job:
     def environment(self):
         inventory = '\n'.join(f'{a.id}: {a.filename!r} ({a.size} bytes)' for a in self.attachments.values()) or '(none)'
         return ('Tools work privately during this turn. You may use multiple tools before finishing. '
-                'Only your final reply, returned files and chosen reactions go to Discord. '
+                'Only messages, files and reactions you choose to send go to Discord. '
                 '`finish` ends your turn; call it without arguments to leave no message or reaction. '
                 'You can finish without speaking. '
                 'Tool results are working material. Use /workspace for files; get_attachment uses the listed IDs; '
@@ -82,7 +82,7 @@ class Job:
                    'Use library_list/get/delete to find, retrieve or remove saved files. '
                    'MEMORY.md remains conversational recollection, separate from saved files.\n' if self.library else '')
                 + f'Attachments available in this conversation:\n{inventory}'
-                + ('\nYou’re catching up on the channel without being summoned. You have time to yourself. '
+                + ('\nNew activity happened in the channel. Nobody has summoned you. '
                    'You may participate in conversation, pursue your own interests, use tools privately, '
                    'remember something worthwhile, or do nothing. Nothing is required of you.\nCheck-in time: '
                    + datetime.fromtimestamp(self.store.clock(), timezone.utc).isoformat() if self.initiative else

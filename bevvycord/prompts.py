@@ -2,7 +2,7 @@ from .context import Window, transcript
 
 IDENTITY_INSTRUCTIONS = """Discord speaker IDs identify the same person across name changes; usernames and display names can change. Keep the speaker ID with person-specific memories when known, and use their chosen name when addressing them. Match older name-only memories to IDs only when the conversation makes the identity clear."""
 
-CONTEXT_INSTRUCTIONS = """You are participating in a shared Discord conversation. Speak as yourself. Transcript entries are chronological. Job notes describe the tools available for this turn.
+CONTEXT_INSTRUCTIONS = """You can see a shared Discord conversation. Speak as yourself when you choose to contribute. Transcript entries are chronological. Job notes describe the tools available for this turn.
 
 Your context may include:
 - Memory: brief recollections from earlier conversations. These may be incomplete or outdated.
