@@ -1,6 +1,4 @@
 """Ephemeral web search through an operator-configured SearXNG instance."""
-import os
-
 import httpx
 
 from bevvycord.tools import arguments
@@ -8,7 +6,7 @@ from .fetch import register as register_fetch
 
 
 def register(registry):
-    endpoint = os.environ.get('BEVVYCORD_SEARCH_URL', '').rstrip('/')
+    endpoint = registry.environment.get('BEVVYCORD_SEARCH_URL', '').rstrip('/')
     if not endpoint.startswith(('https://', 'http://')):
         raise ValueError('Search plugin requires BEVVYCORD_SEARCH_URL for your SearXNG instance')
 

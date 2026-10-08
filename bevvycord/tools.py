@@ -1,6 +1,7 @@
 """Small tool registry and trusted, explicitly enabled Python plugin interface."""
 from dataclasses import dataclass
 import importlib
+import os
 from .filesystem import filesystem_call
 from jsonschema import Draft202012Validator
 
@@ -14,8 +15,9 @@ class Tool:
 
 
 class Registry:
-    def __init__(self):
+    def __init__(self, environment=None):
         self.tools = {}
+        self.environment = dict(os.environ if environment is None else environment)
 
     def add(self, name, description, schema, handler):
         if (not name or len(name) > 64 or any(c not in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-' for c in name)
@@ -105,8 +107,8 @@ async def finish(context, text=None, reply_to=None, reactions=()):
     return context.finish(text, reply_to, reactions)
 
 
-def builtin_registry(settings, memory_enabled, library_enabled=True):
-    registry = Registry()
+def builtin_registry(settings, memory_enabled, library_enabled=True, environment=None):
+    registry = Registry(environment)
     text = {'type': 'string', 'minLength': 1}
     registry.add('finish', 'Finish this turn. text sends your Discord message and staged files (empty text sends files only); '
                  'reply_to optionally selects a conversation message. '

@@ -65,7 +65,7 @@ async def run_supervisor(configs, pause):
             provider = None
             try:
                 provider = Provider(cfg['provider'], environment=environment)
-                async with CharacterBot(cfg, store, provider, coordinator) as bot:
+                async with CharacterBot(cfg, store, provider, coordinator, environment=environment) as bot:
                     await bot.start(token)
             finally:
                 if provider:
@@ -77,7 +77,14 @@ async def run_supervisor(configs, pause):
             await character(cfg)
         except Exception as exc:
             # Do not include exceptions that could contain credentials.
-            log.error('Character %s stopped (%s); other characters continue.', cfg['character']['id'], type(exc).__name__)
+            safe_messages = {
+                'Search plugin requires BEVVYCORD_SEARCH_URL for your SearXNG instance',
+                'Provider API-key environment variable is unset',
+                'Discord bot-token environment variable is unset',
+                f"Character {cfg['character']['id']} is already running against this storage directory",
+            }
+            detail = str(exc) if isinstance(exc, ValueError) and str(exc) in safe_messages else type(exc).__name__
+            log.error('Character %s stopped: %s; other characters continue.', cfg['character']['id'], detail)
 
     tasks = [asyncio.create_task(isolated(cfg)) for cfg in configs]
     try:

@@ -43,7 +43,7 @@ def test_supervisor_isolates_failure_and_closes_clients(tmp_path, monkeypatch):
         def __init__(self, cfg, environment=None): pass
         async def close(self): events.append('provider-closed')
     class Client:
-        def __init__(self, cfg, store, provider, coordinator):
+        def __init__(self, cfg, store, provider, coordinator, environment=None):
             self.name = cfg['character']['id']
             coordinators.append(coordinator)
         async def __aenter__(self): return self
@@ -63,3 +63,46 @@ def test_supervisor_isolates_failure_and_closes_clients(tmp_path, monkeypatch):
     assert 'good-started' in events
     assert 'bad-closed' in events and 'good-closed' in events
     assert events.count('provider-closed') == 2
+
+
+def test_supervisor_search_plugin_uses_each_characters_env_file(tmp_path, monkeypatch):
+    from bevvycord.bot import CharacterBot
+    from bevvycord.storage import Store
+    from test_agent_flow import config
+    monkeypatch.delenv('BEVVYCORD_SEARCH_URL', raising=False)
+    async def scenario():
+        bots, stores = [], []
+        try:
+            for name in ('faust', 'scooter'):
+                env_file = tmp_path / (name + '.env')
+                env_file.write_text(f'BEVVYCORD_SEARCH_URL=https://{name}.example.invalid\n')
+                cfg = config()
+                cfg['character']['id'] = name
+                cfg['env_file'] = str(env_file)
+                cfg['tools']['plugins'] = ['bevvycord.plugins.search']
+                store = Store(tmp_path / 'data', name)
+                stores.append(store)
+                environment = character_environment(cfg)
+                bot = CharacterBot(cfg, store, None, environment=environment)
+                bots.append(bot)
+                assert bot.runtime.registry.environment['BEVVYCORD_SEARCH_URL'] == f'https://{name}.example.invalid'
+                assert 'web_search' in bot.runtime.registry.tools
+        finally:
+            for bot in bots: await bot.close()
+            for store in stores: store.db.close()
+    asyncio.run(scenario())
+
+
+def test_supervisor_safe_startup_error_does_not_expose_arbitrary_exceptions(tmp_path, monkeypatch, caplog):
+    from bevvycord import supervisor
+    configs = [{'character': {'id': 'faust'}, 'storage_dir': str(tmp_path)}]
+    def fail(cfg):
+        raise ValueError('Search plugin requires BEVVYCORD_SEARCH_URL for your SearXNG instance')
+    monkeypatch.setattr(supervisor, 'character_environment', fail)
+    asyncio.run(run_supervisor(configs, 15))
+    assert 'Search plugin requires BEVVYCORD_SEARCH_URL' in caplog.text
+    caplog.clear()
+    def private(cfg): raise ValueError('secret credential data')
+    monkeypatch.setattr(supervisor, 'character_environment', private)
+    asyncio.run(run_supervisor(configs, 15))
+    assert 'secret credential data' not in caplog.text

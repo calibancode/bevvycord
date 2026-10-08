@@ -25,7 +25,7 @@ log = logging.getLogger(__name__)
 
 
 class CharacterBot(discord.Client):
-    def __init__(self, config, store, provider, coordinator=None):
+    def __init__(self, config, store, provider, coordinator=None, environment=None):
         intents = discord.Intents.default()
         intents.message_content = True
         intents.reactions = True
@@ -49,7 +49,7 @@ class CharacterBot(discord.Client):
         self.library_settings = library_settings(config)
         if self.tool_settings['enabled']:
             registry = builtin_registry(self.tool_settings, config.get('memory', {}).get('enabled', False),
-                                        self.library_settings['enabled'])
+                                        self.library_settings['enabled'], environment=environment)
             self.runtime = Runtime(provider, registry, self.tool_settings)
             store.recover_jobs()
 

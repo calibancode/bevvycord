@@ -292,7 +292,10 @@ Unknown tools, argument failures and handler errors become bounded tool results.
 The registry loads only the modules explicitly listed in `tools.plugins`, in order.
 
 Python plugins are trusted operator code with host privileges, not a sandboxed
-extension format. The context is the scoped Job, including its workspace, actor,
+extension format. Plugins read character-specific settings from `registry.environment` during
+registration; reading `os.environ` bypasses supervisor credential/settings isolation.
+
+The context is the scoped Job, including its workspace, actor,
 channel, attachment and artifact helpers, and store. It does not include the
 Discord client. Trusted modules can still import host APIs and read the process
 environment; do not promote model-written workspace code to a plugin.
