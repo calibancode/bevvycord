@@ -287,8 +287,9 @@ def test_new_activity_during_checkin_remains_pending_and_suppresses_stale_output
             clock[0] += 1800
             await bot.initiative_tick()
             assert not channels[100].sent_calls
-            assert store.attention(100)[:2] == (2, 1)
-            assert store.db.execute('SELECT state FROM jobs').fetchall() == [('failed',)]
+            assert store.attention(100)[:2] == (2, 2)
+            assert store.db.execute('SELECT state FROM jobs').fetchall() == [('deferred',), ('complete',)]
+            assert provider.steps == 2
             clock[0] += 1800
             await bot.initiative_tick()
             assert provider.steps == 2

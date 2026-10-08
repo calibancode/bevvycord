@@ -156,8 +156,13 @@ to encountered messages, or reaction changes. Without new human activity it make
 no model request. Bots and webhooks cannot wake it. A normal completed invocation
 consumes the activity it read. Silence also saves the context it read, so it keeps
 continuity without repeatedly reconsidering the same conversation. New human
-activity during a check-in defers its Discord output to a later check. Busy channels
-wait for queued invocations to finish.
+activity during generation discards the stale reply and requeues a fresh check-in.
+The first two interruptions retry immediately; sustained interruptions back off by
+15, 30, then at most 60 seconds, outside channel locks. Each scheduler pass makes
+at most five attempts before giving other channels a chance. Deferred turns retain
+their tool receipts and workspace; retries receive a compact note about completed
+work (the original job plus up to four recent attempts). They do not start the
+normal interval; an uninterrupted completion does. Busy channels wait for queued invocations to finish.
 
 First enable starts from the current channel position. Subsequent restarts can
 catch up on messages posted while offline, bounded by `context.max_fetch_messages`.

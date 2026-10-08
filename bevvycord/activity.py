@@ -69,6 +69,8 @@ def describe(db, event):
             actions.append(f'sent×{outputs["sent"]}')
         else:
             actions.append('no public output recorded')
+    if event['state'] == 'deferred':
+        actions.append('new human activity; tool work retained')
     duration = max(0, event['ended'] - event['started']) if event['ended'] is not None else None
     return (f'{kind} · channel {event["channel"]} · {event["state"]}'
             + (f' · {duration:.0f}s' if duration is not None else '')

@@ -34,6 +34,8 @@ class CharacterBot(discord.Client):
         from .coordinator import ChannelCoordinator
         self.coordinator = coordinator or ChannelCoordinator(pause_seconds=0)
         self.initiative_task = None
+        self.deferred_jobs = {}
+        self.initiative_interruptions = {}
         self.locks = {channel: asyncio.Lock() for channel in config['allowed_channel_ids']}
         self.memory_task = None
         self.cleanup_task = None
@@ -294,6 +296,21 @@ class CharacterBot(discord.Client):
                                   upload_limit=getattr(message.guild, 'filesize_limit', 8 * 1024 * 1024), initiative=initiative,
                                   library_settings=self.library_settings)
                         self.active[channel_id]['job'] = job
+                        if initiative and channel_id in self.deferred_jobs:
+                            previous_jobs = self.deferred_jobs[channel_id]
+                            receipts = []
+                            for previous_job in previous_jobs:
+                                info = job.previous_job_info(previous_job)
+                                receipts.extend({'job_id': previous_job, 'tool': r['tool'],
+                                                 'result_preview': json.dumps(r['result'], ensure_ascii=False)[:200]}
+                                                for r in info['receipts'])
+                            messages.append({'role': 'user', 'content':
+                                '<deferred_checkin>\nEarlier replies were superseded by new human activity. '
+                                'Their tool work remains completed; do not repeat completed actions. '
+                                'Use open_job to recover surviving workspace files if useful.\n'
+                                + json.dumps({'job_ids': previous_jobs, 'receipts': receipts[:40],
+                                              'receipt_count': len(receipts)},
+                                             ensure_ascii=False) + '\n</deferred_checkin>'})
                         result = await self.runtime.run(messages, job)
                         answer = result.answer
                     else:
@@ -302,7 +319,19 @@ class CharacterBot(discord.Client):
                         answer = await self.provider.generate(messages)
                     current_trigger = await message.channel.fetch_message(message.id)
                     if initiative and activity_revision is not None and self.store.attention(channel_id)[0] > activity_revision:
-                        raise ValueError('New human activity arrived during check-in; deferred to the next check')
+                        from .activity import current
+                        event = current.get()
+                        if event is not None:
+                            event['state'] = 'deferred'
+                            event['outputs']['reason'] = 'new human activity'
+                        if job:
+                            self.store.job_state(job.id, 'deferred', 'New human activity; reply discarded, tool work retained')
+                            previous_jobs = self.deferred_jobs.setdefault(channel_id, [])
+                            previous_jobs.append(job.id)
+                            if len(previous_jobs) > 5:
+                                # Keep the original work's handle plus recent attempts.
+                                previous_jobs[1:-4] = []
+                        return 'deferred'
                     # Compare content only: author names can legitimately differ
                     # between gateway and REST copies of the same message.
                     if replace(normalize(current_trigger), name='') != replace(normalize(message), name=''):
@@ -377,6 +406,9 @@ class CharacterBot(discord.Client):
                         self.store.checked_attention(channel_id, activity_revision)
                         if not initiative:
                             self.store.scanned_attention(channel_id, message.id)
+                    if not initiative:
+                        self.deferred_jobs.pop(channel_id, None)
+                        self.initiative_interruptions.pop(channel_id, None)
                     if job:
                         self.store.job_state(job.id, 'complete')
             if reaction_error and not initiative:
@@ -556,67 +588,87 @@ class CharacterBot(discord.Client):
     async def initiative_tick(self):
         interval = self.config.get('initiative', {}).get('interval_minutes', 30) * 60
         for channel_id in sorted(self.initiative_channels):
+            # A burst gets two immediate retries. Sustained activity backs off,
+            # then yields to other channels and the scheduler after five attempts.
+            for attempt in range(5):
+                result = await self.initiative_attempt(channel_id, interval)
+                if result != 'deferred':
+                    break
+                interruptions = self.initiative_interruptions.get(channel_id, 0) + 1
+                self.initiative_interruptions[channel_id] = interruptions
+                if interruptions >= 3:
+                    await asyncio.sleep(min(60, 15 * 2 ** min(interruptions - 3, 2)))
+                if self.stopping:
+                    break
+
+    async def initiative_attempt(self, channel_id, interval):
+        row = self.store.attention(channel_id)
+        if row and self.store.clock() < row[2] + interval:
+            return None
+        lock = self.locks.setdefault(channel_id, asyncio.Lock())
+        if lock.locked() or self.waiting.get(channel_id, 0) or self.capacity.locked():
+            return None
+        async with self.coordinator.turn(channel_id, initiative=True), lock, self.capacity:
             row = self.store.attention(channel_id)
             if row and self.store.clock() < row[2] + interval:
-                continue
-            lock = self.locks.setdefault(channel_id, asyncio.Lock())
-            if lock.locked() or self.waiting.get(channel_id, 0) or self.capacity.locked():
-                continue
-            async with self.coordinator.turn(channel_id, initiative=True), lock, self.capacity:
-                row = self.store.attention(channel_id)
-                if row and self.store.clock() < row[2] + interval:
-                    continue
-                if self.waiting.get(channel_id, 0):
-                    continue
-                try:
-                    channel = self.get_channel(channel_id) or await self.fetch_channel(channel_id)
-                    if isinstance(channel, discord.Thread):
-                        continue
-                    latest = None
-                    async for source in channel.history(limit=self.config['context']['max_fetch_messages']):
-                        if source.type in (discord.MessageType.default, discord.MessageType.reply):
-                            latest = source
-                            break
-                    if not latest:
-                        self.store.baseline_attention(channel_id)
-                        self.store.checked_attention(channel_id, row[0] if row else 0)
-                        continue
-                    if row is None:
-                        # First enable starts here; it does not revive old chat.
-                        self.store.baseline_attention(channel_id, latest.id)
-                        continue
-                    if latest.id > row[3]:
-                        observed = []
-                        async for source in channel.history(after=discord.Object(id=row[3]),
-                                                            oldest_first=False,
-                                                            limit=self.config['context']['max_fetch_messages']):
-                            observed.append(source)
-                        for source in reversed(observed):
-                            self.store.note_activity(channel_id, source.id,
-                                source.type in (discord.MessageType.default, discord.MessageType.reply)
-                                and self.message_activity(source))
-                        readable = [source for source in observed if source.type in (discord.MessageType.default, discord.MessageType.reply)]
-                        if readable:
-                            latest = max([latest, *readable], key=lambda source: source.id)
-                        self.store.scanned_attention(channel_id, max([latest.id, *(source.id for source in observed)]))
-                    revision, seen, _, _ = self.store.attention(channel_id)
-                    # Consume this batch even if work fails, avoiding replay of
-                    # potentially delivered actions. New activity stays pending.
+                return None
+            if self.waiting.get(channel_id, 0):
+                return None
+            try:
+                channel = self.get_channel(channel_id) or await self.fetch_channel(channel_id)
+                if isinstance(channel, discord.Thread):
+                    return None
+                latest = None
+                async for source in channel.history(limit=self.config['context']['max_fetch_messages']):
+                    if source.type in (discord.MessageType.default, discord.MessageType.reply):
+                        latest = source
+                        break
+                if not latest:
+                    self.store.baseline_attention(channel_id)
+                    self.store.checked_attention(channel_id, row[0] if row else 0)
+                    return None
+                if row is None:
+                    # First enable starts here; it does not revive old chat.
+                    self.store.baseline_attention(channel_id, latest.id)
+                    return None
+                if latest.id > row[3]:
+                    observed = []
+                    async for source in channel.history(after=discord.Object(id=row[3]),
+                                                        oldest_first=False,
+                                                        limit=self.config['context']['max_fetch_messages']):
+                        observed.append(source)
+                    for source in reversed(observed):
+                        self.store.note_activity(channel_id, source.id,
+                            source.type in (discord.MessageType.default, discord.MessageType.reply)
+                            and self.message_activity(source))
+                    readable = [source for source in observed if source.type in (discord.MessageType.default, discord.MessageType.reply)]
+                    if readable:
+                        latest = max([latest, *readable], key=lambda source: source.id)
+                    self.store.scanned_attention(channel_id, max([latest.id, *(source.id for source in observed)]))
+                revision, seen, _, _ = self.store.attention(channel_id)
+                # Consume this batch even if work fails, avoiding replay of
+                # potentially delivered actions. New activity stays pending.
+                self.store.consume_attention(channel_id, revision)
+                if revision <= seen:
                     self.store.checked_attention(channel_id, revision)
-                    if revision <= seen:
-                        continue
-                    task = asyncio.create_task(self.respond(latest, initiative=True, activity_revision=revision))
-                    self.tasks.add(task)
-                    try:
-                        await task
-                    except asyncio.CancelledError:
-                        if asyncio.current_task().cancelling():
-                            raise
-                    finally:
-                        self.tasks.discard(task)
+                    return None
+                result = None
+                task = asyncio.create_task(self.respond(latest, initiative=True, activity_revision=revision))
+                self.tasks.add(task)
+                try:
+                    result = await task
+                    return result
+                except asyncio.CancelledError:
+                    if asyncio.current_task().cancelling():
+                        raise
+                finally:
+                    self.tasks.discard(task)
+                    if result != 'deferred':
                         self.store.checked_attention(channel_id, revision)
-                except discord.HTTPException:
-                    log.warning('Could not check initiative channel %s', channel_id)
+                        self.deferred_jobs.pop(channel_id, None)
+                        self.initiative_interruptions.pop(channel_id, None)
+            except discord.HTTPException:
+                log.warning('Could not check initiative channel %s', channel_id)
 
     async def initiative_loop(self):
         await self.wait_until_ready()

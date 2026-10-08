@@ -155,6 +155,12 @@ class Store:
                             (message_id, str(channel)))
             self.db.execute('DELETE FROM attention_messages WHERE channel=? AND id<=?', (str(channel), message_id))
 
+    def consume_attention(self, channel, revision):
+        """Consume a batch without starting the next check-in interval."""
+        with self.db:
+            self.db.execute('UPDATE attention SET seen=MAX(seen,?) WHERE channel=?',
+                            (revision, str(channel)))
+
     def checked_attention(self, channel, revision):
         with self.db:
             self.db.execute('UPDATE attention SET seen=MAX(seen,?),last_check=? WHERE channel=?',
