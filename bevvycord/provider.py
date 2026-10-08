@@ -45,7 +45,12 @@ class Provider:
         data = response.json()
         choice = data['choices'][0]
         usage = data.get('usage', {})
-        log.info('Usage: prompt=%s completion=%s cache_hit=%s cache_miss=%s',
+        from .activity import current
+        event = current.get()
+        if event is not None:
+            event['usage'].append({key: usage.get(key) for key in (
+                'prompt_tokens', 'completion_tokens', 'prompt_cache_hit_tokens', 'prompt_cache_miss_tokens')})
+        log.debug('Usage: prompt=%s completion=%s cache_hit=%s cache_miss=%s',
                  usage.get('prompt_tokens'), usage.get('completion_tokens'),
                  usage.get('prompt_cache_hit_tokens'), usage.get('prompt_cache_miss_tokens'))
         # The runtime replays the complete assistant message internally, including

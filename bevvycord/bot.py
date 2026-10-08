@@ -249,6 +249,11 @@ class CharacterBot(discord.Client):
         return found
 
     async def respond(self, message, initiative=False, activity_revision=None):
+        from .activity import observe
+        return await observe(self.store, message.channel.id, 'check-in' if initiative else 'invoked',
+                             lambda: self._respond(message, initiative, activity_revision))
+
+    async def _respond(self, message, initiative=False, activity_revision=None):
         cfg, job, messages, reaction_error = self.config, None, None, None
         channel_id = message.channel.id
         self.store.note_invocation(channel_id)
@@ -331,6 +336,10 @@ class CharacterBot(discord.Client):
                         if job:
                             self.store.delivery(job.id, len(sent), reply.id)
                         sent.append(normalize(reply))
+                        from .activity import current
+                        event = current.get()
+                        if event is not None:
+                            event['outputs']['sent'] = len(sent)
                     for index, (source, emoji) in enumerate(reaction_targets, len(sent)):
                         self.store.delivery(job.id, index, source.id, kind='reaction', emoji=emoji, state='started')
                         try:
@@ -378,6 +387,10 @@ class CharacterBot(discord.Client):
                     pass
             raise
         except Exception as exc:
+            from .activity import current
+            event = current.get()
+            if event is not None:
+                event['state'] = 'failed'
             if job:
                 # Library exceptions can embed secrets even in ValueError or
                 # RuntimeError; use the same safe explanation as model recovery.
@@ -443,6 +456,10 @@ class CharacterBot(discord.Client):
                         self.store.delivery(job.id, part, sent.id)
                     self.store.update(message.channel.id, normalize(sent))
                     delivered.append(normalize(sent))
+                    from .activity import current as activity_current
+                    event = activity_current.get()
+                    if event is not None:
+                        event['outputs']['sent'] = event['outputs'].get('sent', 0) + 1
                     continuation = True
                     part += 1
                 return delivered
@@ -600,7 +617,6 @@ class CharacterBot(discord.Client):
                         continue
                     try:
                         await update_memory(self.store, self.provider, self.config, channel)
-                        log.info('Memory updated for channel %s', channel)
                     except Exception as exc:
                         self.store.memory_failed(channel, settings.get('retry_minutes', 30))
                         log.error('Memory update failed for channel %s (%s)', channel, type(exc).__name__)

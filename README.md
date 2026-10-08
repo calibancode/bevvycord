@@ -50,6 +50,19 @@ Mention it or reply to its message. Bots and webhooks are visible in context but
 cannot invoke it. Ctrl+C shuts down cleanly. Run onboarding again for another
 character and launch it in a separate terminal.
 
+Each turn prints a concise activity summary: tools used, messages/reactions sent,
+private work or silence, and token/cache usage. Inspect local history without
+credentials or network calls:
+
+```bash
+./bin/run-rowan --activity
+./bin/run-rowan --activity --job FULL_JOB_ID
+./bin/run-rowan --activity --memory-diffs
+```
+
+Memory diffs are shown only when requested. Activity stays in SQLite after job
+files expire; older jobs have unknown origin and token usage.
+
 ## Configuration
 
 Edit `characters/<name>.yaml` and restart. The reply model defaults to

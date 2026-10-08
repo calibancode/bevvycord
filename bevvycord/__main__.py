@@ -78,9 +78,14 @@ def main():
     action.add_argument('--check-config', action='store_true', help='Validate without network calls or secrets')
     action.add_argument('--memory-once', type=int, metavar='CHANNEL_ID', help='Rewrite memory from scratch now (makes a provider API call)')
     action.add_argument('--jobs', action='store_true', help='List local job states in allowed channels; no credentials or network')
+    action.add_argument('--activity', action='store_true', help='Inspect local turns and memory activity; no credentials or network')
+    parser.add_argument('--job', help='Inspect a full job ID with --activity')
+    parser.add_argument('--memory-diffs', action='store_true', help='Show recorded memory changes with --activity')
     action.add_argument('--invite', nargs='?', const='', metavar='APPLICATION_ID',
                         help='Print a join link using an explicit or configured public application ID; no keys or network')
     args = parser.parse_args()
+    if (args.job or args.memory_diffs) and not args.activity:
+        parser.error('--job and --memory-diffs require --activity')
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
     # httpx INFO includes request URLs; suppress unnecessary networking logs.
     logging.getLogger('httpx').setLevel(logging.WARNING)
@@ -111,6 +116,12 @@ def main():
             for job_id, channel, actor, state, detail in db.execute('SELECT id,channel,actor,state,detail FROM jobs ORDER BY created DESC LIMIT 100'):
                 if int(channel) in cfg['allowed_channel_ids']:
                     print(f'{job_id}  channel={channel} requester={actor} {state} {detail}')
+        return
+    if args.activity:
+        from .activity import inspect_activity
+        path = Path(cfg['storage_dir']) / cfg['character']['id'] / 'history.sqlite3'
+        for line in inspect_activity(path, cfg['allowed_channel_ids'], args.job, memory_diffs=args.memory_diffs):
+            print(line)
         return
     load_env_file(cfg.get('env_file'))
     load_env_file(cfg.get('shared_env_file'))

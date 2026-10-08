@@ -25,6 +25,13 @@ def _enabled(config):
 
 
 async def rebuild_memory(store, provider, config, channel):
+    from .activity import current, observe
+    if current.get() is not None and current.get()['kind'] == 'memory':
+        return await _rebuild_memory(store, provider, config, channel)
+    return await observe(store, channel, 'memory', lambda: _rebuild_memory(store, provider, config, channel))
+
+
+async def _rebuild_memory(store, provider, config, channel):
     """Forced refresh: rewrite MEMORY.md from scratch using the full archive,
     standing remember/forget requests and the current MEMORY.md."""
     settings = _enabled(config)
@@ -74,6 +81,11 @@ def apply_edit(draft, name, args):
 
 
 async def update_memory(store, provider, config, channel):
+    from .activity import observe
+    return await observe(store, channel, 'memory', lambda: _update_memory(store, provider, config, channel))
+
+
+async def _update_memory(store, provider, config, channel):
     """Scheduled update: edit the existing MEMORY.md with what changed since
     the last run. Without an existing memory, fall back to a full refresh."""
     settings = _enabled(config)

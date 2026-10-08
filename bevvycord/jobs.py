@@ -48,6 +48,11 @@ class Job:
         self.upload_limit = min(upload_limit or settings['file_bytes'], settings['file_bytes'])
         self.sandbox = Sandbox(settings)
         store.create_job(self.id, channel, actor, trigger_id)
+        from .activity import current
+        event = current.get()
+        if event is not None:
+            event['job'] = self.id
+            store.save_activity(event)
 
     def environment(self):
         inventory = '\n'.join(f'{a.id}: {a.filename!r} ({a.size} bytes)' for a in self.attachments.values()) or '(none)'

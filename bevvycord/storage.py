@@ -56,6 +56,12 @@ class Store:
               changed REAL NOT NULL, PRIMARY KEY(channel,message_id));
             CREATE TABLE IF NOT EXISTS attention_messages (
               channel TEXT NOT NULL, id INTEGER NOT NULL, PRIMARY KEY(channel,id));
+            CREATE TABLE IF NOT EXISTS activity (
+              id TEXT PRIMARY KEY, job TEXT, kind TEXT NOT NULL, channel TEXT NOT NULL,
+              started REAL NOT NULL, ended REAL, state TEXT NOT NULL,
+              usage TEXT NOT NULL, changes TEXT NOT NULL, outputs TEXT NOT NULL);
+            CREATE INDEX IF NOT EXISTS activity_started ON activity(started DESC);
+            CREATE INDEX IF NOT EXISTS activity_job ON activity(job);
         ''')
         self._migrate_columns()
         self._migrate_schedule()
@@ -278,6 +284,7 @@ class Store:
 
     def recover_jobs(self):
         with self.db:
+            self.db.execute("UPDATE activity SET state='interrupted',ended=? WHERE state IN ('running','delivering')", (self.clock(),))
             self.db.execute("UPDATE jobs SET state='interrupted',updated=? WHERE state IN ('running','delivering')", (self.clock(),))
 
     def create_job(self, job_id, channel, actor, trigger_id):
@@ -288,6 +295,21 @@ class Store:
     def job_state(self, job_id, state, detail=''):
         with self.db:
             self.db.execute('UPDATE jobs SET state=?,updated=?,detail=? WHERE id=?', (state, self.clock(), detail, job_id))
+        from .activity import current
+        event = current.get()
+        if event is not None and event['job'] == job_id:
+            event['state'] = state
+
+    def save_activity(self, event):
+        # Observability must not abort an otherwise valid character turn.
+        try:
+            with self.db:
+                self.db.execute('INSERT OR REPLACE INTO activity VALUES (?,?,?,?,?,?,?,?,?,?)',
+                    (event['id'], event['job'], event['kind'], event['channel'], event['started'],
+                     event['ended'], event['state'], json.dumps(event['usage']), json.dumps(event['changes']), json.dumps(event['outputs'])))
+        except sqlite3.Error:
+            import logging
+            logging.getLogger(__name__).warning('Could not record local activity')
 
     def delivery(self, job_id, part, message_id=None, *, kind='message', emoji='', state=None):
         with self.db:
@@ -408,10 +430,19 @@ class Store:
     def write_memory(self, channel, content, interaction_id, note_ids=(), through=None):
         through = self.clock() if through is None else through
         path = self.memory_path(channel)
+        previous_content = path.read_text() if path.exists() else ''
         # Retain one previous revision for review/recovery.
         if path.exists():
             self._atomic(path.with_name('MEMORY.previous.md'), path.read_text())
         self._atomic(path, content.rstrip() + '\n')
+        from .activity import current
+        event = current.get()
+        new_content = content.rstrip() + '\n'
+        if event is not None and event['kind'] == 'memory' and previous_content != new_content:
+            import difflib
+            event['changes'].append('\n'.join(difflib.unified_diff(
+                previous_content.splitlines(), new_content.splitlines(),
+                fromfile='MEMORY.previous.md', tofile='MEMORY.md', lineterm='')))
         self._atomic(path.with_name('memory-provenance.json'), json.dumps({'through_interaction': interaction_id}))
         with self.db:
             self.db.execute('INSERT INTO memory_runs VALUES (?,?,?) ON CONFLICT(channel) DO UPDATE SET interaction_id=excluded.interaction_id,through=excluded.through',
@@ -421,6 +452,8 @@ class Store:
             self.db.execute("UPDATE messages SET body='{}' WHERE channel=? AND deleted=1 AND changed<=?", (str(channel), through))
             self.db.execute('UPDATE memory_schedule SET pending_since=NULL,last_success=?,retry_after=NULL WHERE channel=?', (self.clock(), str(channel)))
             self.db.execute('DELETE FROM memory_forced WHERE channel=?', (str(channel),))
+        if event is not None and event['kind'] == 'memory':
+            event['outputs']['notes_applied'] = len(note_ids)
 
     @staticmethod
     def _atomic(path, content):
