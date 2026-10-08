@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import sqlite3
 import signal
+import sys
 
 from .config import load_config
 from .memory import rebuild_memory
@@ -69,6 +70,8 @@ async def interruptible_run(args, cfg):
 
 
 def main():
+    if sys.version_info < (3, 11):
+        raise SystemExit('Bevvycord requires Python 3.11 or newer; rebuild the virtual environment with a supported interpreter.')
     parser = argparse.ArgumentParser(description='Channel-aware Discord character bot')
     parser.add_argument('--config', default='config.yaml')
     action = parser.add_mutually_exclusive_group()
