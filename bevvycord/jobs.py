@@ -57,8 +57,10 @@ class Job:
                 f'Tool budget: {self.settings["max_steps"] - 1} working model requests, '
                 f'{self.settings["max_calls"]} tool calls; stage files before your final reply.\n'
                 f'Job ID: {self.id}\nAttachments available in this conversation:\n{inventory}'
-                + ('\nYou’re catching up on the channel without being summoned. Join in, follow up on '
-                   'something you remember, react, or stay quiet as suits you. Use finish to choose.\nCheck-in time: '
+                + ('\nYou have some time to yourself. Nobody is asking you for anything. '
+                   'You may pursue your interests or unfinished business, use tools privately, '
+                   'join the conversation, or do nothing. There is no obligation to act. '
+                   'Use finish when you’re done.\nCheck-in time: '
                    + datetime.fromtimestamp(self.store.clock(), timezone.utc).isoformat() if self.initiative else
                    '\nSomeone is addressing you. Respond to their latest message.'))
 
