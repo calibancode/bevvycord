@@ -1,9 +1,36 @@
 import logging
+import hashlib
+import json
 import os
 import httpx
 from .recovery import ProviderError, TurnError
 
 log = logging.getLogger(__name__)
+
+
+def request_fingerprints(messages, tools=None, tool_choice=None):
+    """Content-free diagnostics; hashes identify changes, not provider cache keys."""
+    def fingerprint(value):
+        encoded = json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(',', ':'))
+        return hashlib.sha256(encoded.encode('utf-8')).hexdigest()[:32]
+
+    sections = {}
+    for message in messages:
+        content = message.get('content')
+        section = 'working'
+        if message.get('role') == 'system':
+            section = 'system'
+        elif message.get('role') == 'user' and isinstance(content, str):
+            section = next((name for name in ('conversation', 'memory', 'reactions', 'job', 'deferred_checkin')
+                            if content.startswith('<' + name + '>')), 'context')
+        sections.setdefault(section, []).append(message)
+    result = {'sections': {name: {'hash': fingerprint(group), 'messages': len(group)}
+                           for name, group in sections.items()},
+              'tools': fingerprint({'tools': tools or [], 'tool_choice': tool_choice})}
+    conversation = sections.get('conversation')
+    if conversation:
+        result['conversation_head'] = fingerprint(conversation[0])
+    return result
 
 
 class Provider:
@@ -48,8 +75,14 @@ class Provider:
         from .activity import current
         event = current.get()
         if event is not None:
-            event['usage'].append({key: usage.get(key) for key in (
-                'prompt_tokens', 'completion_tokens', 'prompt_cache_hit_tokens', 'prompt_cache_miss_tokens')})
+            recorded = {key: usage.get(key) for key in (
+                'prompt_tokens', 'completion_tokens', 'prompt_cache_hit_tokens', 'prompt_cache_miss_tokens')}
+            recorded['model'] = payload['model']
+            recorded['fingerprints'] = request_fingerprints(messages, tools, tool_choice)
+            for key in ('model', 'system_fingerprint'):
+                if isinstance(data.get(key), str):
+                    recorded['served_model' if key == 'model' else key] = data[key]
+            event['usage'].append(recorded)
         log.debug('Usage: prompt=%s completion=%s cache_hit=%s cache_miss=%s',
                  usage.get('prompt_tokens'), usage.get('completion_tokens'),
                  usage.get('prompt_cache_hit_tokens'), usage.get('prompt_cache_miss_tokens'))

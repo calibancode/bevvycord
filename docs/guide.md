@@ -219,8 +219,8 @@ prompt still fails rather than silently clipping it.
 The character prompt and context instructions stay fixed. Memory and each labelled
 Discord message have separate API-message boundaries; changing job details come
 last in their own message. Follow-ups retain the unchanged history as an identical
-message prefix, even when a speaker's chunk grows. Resets, edits, bridge retirement,
-and memory changes can break that prefix. Usage logs report DeepSeek cache
+message prefix, even when a speaker's chunk grows. Resets, transcript edits/deletions and bridge retirement can break that prefix. Current memory follows the transcript,
+so memory updates preserve the retained conversation prefix. Usage logs report DeepSeek cache
 hit/miss fields when the provider supplies them; savings are not guaranteed.
 
 ## Optional memory

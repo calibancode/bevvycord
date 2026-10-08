@@ -140,6 +140,10 @@ def inspect_activity(path, channels, job=None, limit=50, memory_diffs=False):
             date = datetime.fromtimestamp(event['started'], timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
             lines.append(f'{date} · {describe(db, event)} · job {event["job"] or "—"}')
             if job:
+                for index, request in enumerate(json.loads(event['usage']), 1):
+                    lines.append(f'  request {index}: model={request.get("model", "unknown")} · {usage_line([request])}')
+                    if request.get('fingerprints'):
+                        lines.append('    fingerprints: ' + json.dumps(request['fingerprints'], sort_keys=True))
                 for name, result in db.execute('SELECT name,result FROM tool_receipts WHERE job=? ORDER BY rowid', (job,)):
                     state = 'uncertain' if result is None else 'returned'
                     if result:

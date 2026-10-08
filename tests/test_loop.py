@@ -148,7 +148,7 @@ def test_full_conversation_loop_with_memory_restart_and_absence(tmp_path, monkey
             bot = CharacterBot(cfg, store, provider)
             bot._connection.user = NS(id=9)
             await bot.on_message(world.message(main, 'AFTER RESTART', invoke=True))
-            assert '<memory>\n- I remember' in provider.requests[-1][1]['content']
+            assert any('<memory>\n- I remember' in m['content'] for m in provider.requests[-1])
             assert 'TESTING CHANNEL ONLY' not in payload(provider.requests[-1])
 
             # Failed generations must not advance the successful checkpoint.

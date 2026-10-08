@@ -133,3 +133,50 @@ def test_reaction_only_and_silent_classification(tmp_path):
     store.delivery(current_job.id, 0, 1, kind='reaction', emoji='❤️')
     report = '\n'.join(inspect_activity(store.root / 'history.sqlite3', {100}))
     assert 'reacted×1' in report and 'silent' not in report
+
+
+def test_request_fingerprints_track_memory_without_recording_content(tmp_path, monkeypatch):
+    from bevvycord.prompts import reply_messages
+    from bevvycord.context import Window, Message
+    monkeypatch.setenv('ACTIVITY_TEST_KEY', 'test')
+    current_job, _ = job(tmp_path)
+    store = current_job.store
+    window = Window([Message(1, 7, 'bevvy', 'now', 'PRIVATE CONVERSATION')])
+    tools = [{'type': 'function', 'function': {'name': 'test', 'parameters': {'type': 'object'}}}]
+    async def scenario():
+        provider = Provider({'api_key_env': 'ACTIVITY_TEST_KEY', 'base_url': 'https://example.org', 'model': 'reply-model'})
+        await provider.client.aclose()
+        def respond(request):
+            payload = json.loads(request.content)
+            return httpx.Response(200, json={'model': payload['model'], 'system_fingerprint': 'backend-test',
+                'choices': [{'message': {'content': 'ok'}, 'finish_reason': 'stop'}],
+                'usage': {'prompt_tokens': 100, 'prompt_cache_hit_tokens': 80, 'prompt_cache_miss_tokens': 20}})
+        provider.client = httpx.AsyncClient(base_url='https://example.org', transport=httpx.MockTransport(respond))
+        async def work():
+            current.get()['job'] = current_job.id
+            first = reply_messages('PRIVATE CHARACTER', 9, window, 'PRIVATE OLD MEMORY')
+            second = reply_messages('PRIVATE CHARACTER', 9, window, 'PRIVATE NEW MEMORY')
+            await provider.complete(first, tools=tools)
+            await provider.complete(second, tools=tools)
+            await provider.complete(second, model='memory-model', tools=tools[:0])
+        try:
+            await observe(store, 100, 'invoked', work)
+        finally:
+            await provider.close()
+    asyncio.run(scenario())
+    raw = store.db.execute('SELECT usage FROM activity').fetchone()[0]
+    first, second, third = json.loads(raw)
+    assert first['model'] == first['served_model'] == 'reply-model'
+    assert third['model'] == 'memory-model'
+    assert first['system_fingerprint'] == 'backend-test'
+    a, b = first['fingerprints'], second['fingerprints']
+    assert a['sections']['system'] == b['sections']['system']
+    assert a['sections']['conversation'] == b['sections']['conversation']
+    assert a['conversation_head'] == b['conversation_head']
+    assert a['sections']['memory'] != b['sections']['memory']
+    assert a['tools'] == b['tools'] != third['fingerprints']['tools']
+    report = '\n'.join(inspect_activity(store.root / 'history.sqlite3', {100}, current_job.id))
+    assert 'request 1: model=reply-model' in report and 'fingerprints:' in report
+    for text in ('PRIVATE CHARACTER', 'PRIVATE CONVERSATION', 'PRIVATE OLD MEMORY', 'PRIVATE NEW MEMORY'):
+        assert text not in raw and text not in report
+    store.db.close()

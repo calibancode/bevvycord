@@ -25,8 +25,6 @@ def reply_messages(prompt, speaker_id, window, memory=None):
     messages = [{'role': 'system', 'content': prompt.strip()
                  + f'\n\nYour Discord speaker ID is bot:{speaker_id}.\n\n' + CONTEXT_INSTRUCTIONS
                  + '\n\n' + IDENTITY_INSTRUCTIONS}]
-    if memory is not None:
-        messages.append({'role': 'user', 'content': '<memory>\n' + (memory.strip() or '(empty)') + '\n</memory>'})
     for message in window.messages:
         if message.id == window.gap_before:
             messages.append({'role': 'user', 'content':
@@ -38,6 +36,9 @@ def reply_messages(prompt, speaker_id, window, memory=None):
         messages.append({'role': 'user', 'content':
                          '[Context note: The channel-history fetch limit was reached. '
                          'Earlier conversation is omitted; the oldest speaker run may be partial.]'})
+    # Mutable memory follows the transcript so updates preserve its cached prefix.
+    if memory is not None:
+        messages.append({'role': 'user', 'content': '<memory>\n' + (memory.strip() or '(empty)') + '\n</memory>'})
     return messages
 
 MEMORY_REQUESTS = """Memory requests are notes made during conversation, attributed to whoever asked. A remember request is something to keep. A forget request names something to leave out: remove it, and never write that you were asked to forget it, since that line would preserve it. A later request or later conversation can bring it back. A request about someone other than the requester is the requester's wish, not theirs; weigh it in character."""

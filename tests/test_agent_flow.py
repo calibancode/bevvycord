@@ -157,7 +157,7 @@ def run_file_memory_flow(tmp_path, monkeypatch, real_exec=False, fail_delivery=F
             assert store.due_memory_channels(cfg['memory']) == ['100']
             await rebuild_memory(store, provider, cfg, 100)
             await bot.on_message(Message(channel, '<@9> next ordinary reply'))
-            assert '<memory>\n- Bevvy prefers text files.' in requests[-1][1]['content']
+            assert any('<memory>\n- Bevvy prefers text files.' in m['content'] for m in requests[-1])
             assert 'PRIVATE INTERNAL REASONING' not in str(requests[-1])
         finally:
             await bot.close()

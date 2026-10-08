@@ -15,8 +15,17 @@ as a separate final API message. Character instructions, memory and each labelle
 Discord message occupy separate API messages. Unchanged history entries remain
 identical message prefixes across invocations, including when a speaker's chunk
 grows. The 20/40 window limits still count speaker chunks, not API messages.
-Memory updates, message edits/deletions and window resets legitimately change
-these prefixes. Private tool messages are never replayed into later Discord turns.
+Message edits/deletions and window resets legitimately change these prefixes. Private tool messages are never replayed into later Discord turns. Current memory
+follows the transcript so updating it does not invalidate the conversation prefix.
+
+Successful requests record the requested model, the served model/backend identifier
+when returned, and content-free hashes/counts for prompt sections and tool definitions
+in the existing activity usage JSON. The conversation's first-message hash distinguishes
+window resets from growth. These hashes are local diagnostics, not DeepSeek cache keys.
+`--activity --job FULL_JOB_ID` shows per-request usage and fingerprints; old records
+remain readable. Routine summaries stay compact. No prompt bodies, API credentials,
+or raw private tool traces are added to usage records.
+
 Current attributed reactions occupy a separate user message after the transcript
 and before the job description. Changing reactions do not rewrite transcript entries.
 Schemas remain stable. The provider returns either a completed final answer or
