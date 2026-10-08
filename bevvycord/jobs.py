@@ -129,6 +129,7 @@ class Job:
                 size += (Path(root) / name).lstat().st_size
         if size + extra > self.settings['workspace_bytes'] or count > self.settings['workspace_files']:
             raise ValueError('Workspace storage limit exceeded')
+        return size
 
     def write_file(self, path, content):
         data = content.encode('utf-8')

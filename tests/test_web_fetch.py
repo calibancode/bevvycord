@@ -31,6 +31,29 @@ def test_download_and_freeze_image(tmp_path, monkeypatch):
     assert current.artifacts[0].path.read_bytes() == image
 
 
+def test_multichunk_download_scans_once_for_growth(tmp_path, monkeypatch):
+    current, _ = job(tmp_path)
+    scans = []
+    original = current.check_storage
+    def scan(extra=0):
+        scans.append(extra)
+        return original(extra)
+    current.check_storage = scan
+    payload = b'x' * (65536 * 5)
+    mock_web(monkeypatch, lambda req: httpx.Response(200, stream=httpx.ByteStream(payload)))
+    result = asyncio.run(web.fetch(current, 'https://example.org/file.bin'))
+    assert current.path(result['path']).read_bytes() == payload
+    assert scans == [0, 0, 0]  # initial, empty destination, final
+
+
+def test_destination_entries_are_counted_before_download(tmp_path, monkeypatch):
+    current, _ = job(tmp_path, workspace_files=1)
+    mock_web(monkeypatch, lambda req: httpx.Response(200, stream=httpx.ByteStream(b'x')))
+    with pytest.raises(ValueError, match='storage limit'):
+        asyncio.run(web.fetch(current, 'https://example.org/file.bin'))
+    assert not list(current.work.rglob('*.bin'))
+
+
 def test_html_readable_text_and_original_saved(tmp_path, monkeypatch):
     current, _ = job(tmp_path, output_chars=20)
     html = b'<html><style>hidden style</style><h1>Buddy &amp; Darnell</h1><p>Race <b>together</b>.</p><script>secret script</script></html>'

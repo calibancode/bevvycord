@@ -120,6 +120,26 @@ def test_archive_changes_schedule_memory_without_new_participation(tmp_path):
     assert store.pending_channels() == ['100']
 
 
+def test_renames_refresh_identity_without_false_edits(tmp_path):
+    from dataclasses import replace
+    store = Store(tmp_path, 'rowan')
+    original = msg(1)
+    store.complete(100, Window([original]), 'first')
+    store.write_memory(100, '- original', store.checkpoint(100))
+    renamed = replace(original, name='Bevvy!', username='bevvy2')
+    store.update(100, renamed)
+    assert store.pending_channels() == []
+    assert '<edited_messages' not in store.changes(100)[0]
+    assert store.previous(100).messages == [renamed]
+    edited = replace(renamed, reply_to=99)
+    store.update(100, edited)
+    changed = store.db.execute('SELECT changed FROM messages').fetchone()[0]
+    store.update(100, replace(edited, name='Another name'))
+    assert store.db.execute('SELECT changed FROM messages').fetchone()[0] == changed
+    assert store.pending_channels() == ['100']
+    assert '<edited_messages' in store.changes(100)[0]
+
+
 def test_channel_and_character_isolation_archive_dedup_and_deletions(tmp_path):
     store = Store(tmp_path, 'rowan')
     store.complete(100, Window([msg(1), msg(2)], last_response_id=2), 'now')

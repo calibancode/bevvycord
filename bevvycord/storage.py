@@ -226,7 +226,11 @@ class Store:
                     continue
                 self.db.execute('INSERT INTO messages VALUES (?, ?, ?, 0, NULL) ON CONFLICT(channel,id) DO UPDATE SET body=excluded.body WHERE messages.deleted=0',
                                 (str(channel), message.id, body))
-                if old:
+                # Account metadata changes are not edits to the conversation.
+                # Keep any earlier pending content edit's changed timestamp.
+                previous = json.loads(old[0]) if old else None
+                if previous and (previous.get('text') != message.text
+                                 or previous.get('reply_to') != message.reply_to):
                     self.db.execute('UPDATE messages SET changed=? WHERE channel=? AND id=?', (self.clock(), str(channel), message.id))
                     self._mark_pending(channel)
 

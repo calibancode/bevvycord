@@ -163,11 +163,15 @@ async def fetch(context, url):
                         destination = context.path(f'web/{uuid.uuid4().hex[:12]}-{filename}', create_parent=True)
                         size = 0
                         with destination.open('xb') as output:
+                            # Tools run sequentially: the empty destination and
+                            # its parent are counted once, then only its bytes grow.
+                            baseline = await filesystem_call(context.check_storage)
                             async for chunk in response.aiter_raw(chunk_size=65536):
                                 size += len(chunk)
                                 if size > maximum:
                                     raise ValueError('Web file exceeds the configured size limit')
-                                await filesystem_call(context.check_storage, len(chunk))
+                                if baseline + size > context.settings['workspace_bytes']:
+                                    raise ValueError('Workspace storage limit exceeded')
                                 output.write(chunk)
                                 output.flush()
                         await filesystem_call(context.check_storage)
