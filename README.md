@@ -8,7 +8,7 @@ memory, and tools. Built around DeepSeek and inspired by
   with speaker labels, timestamps, reply references, and attributed reactions.
 - **Continuity:** a rolling context uses 20 speaker chunks by default, growing
   to 40 and bridging longer absences with part of the previous conversation.
-- **Optional memory:** each character writes its own local `MEMORY.md`, updating
+- **Optional memory:** characters keep a local `MEMORY.md` per channel, updating
   it after quiet periods or explicit remember/forget requests.
 - **Optional tools:** sandboxed code, attachment processing, returned files,
   and web search/fetch through an included SearXNG plugin.

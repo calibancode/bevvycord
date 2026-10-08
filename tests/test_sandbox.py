@@ -3,6 +3,7 @@ import asyncio
 import os
 from pathlib import Path
 import time
+import threading
 
 import pytest
 
@@ -10,6 +11,19 @@ from bevvycord.config import tool_settings
 from bevvycord.sandbox import Sandbox
 
 pytestmark = pytest.mark.skipif(os.environ.get('BEVVYCORD_SANDBOX_TESTS') != '1', reason='Set BEVVYCORD_SANDBOX_TESTS=1 on a Linux host with Bubblewrap namespaces')
+
+
+def test_storage_monitor_walks_off_the_gateway_thread(tmp_path, monkeypatch):
+    main_thread = threading.get_ident()
+    threads = []
+    original = os.walk
+    def walk(*args, **kwargs):
+        threads.append(threading.get_ident())
+        yield from original(*args, **kwargs)
+    monkeypatch.setattr('bevvycord.sandbox.os.walk', walk)
+    result = asyncio.run(Sandbox(tool_settings({})).execute(tmp_path, 'printf ok'))
+    assert result['exit_code'] == 0 and result['output'] == 'ok'
+    assert threads and main_thread not in threads
 
 
 def test_real_transformation_environment_network_and_bounds(tmp_path, monkeypatch):

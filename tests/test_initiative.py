@@ -426,7 +426,8 @@ def test_normal_and_burst_reactors_are_distinct_and_large_lists_marked_partial()
 def test_rejected_emoji_does_not_fail_a_delivered_reply(tmp_path):
     async def scenario():
         clock = [10000]
-        provider = Scripted(response(call('finish', {'text': 'A reply', 'reactions': [{'message_id': 1, 'emoji': ':nope:'}]})))
+        provider = Scripted(response(call('finish', {'text': 'A reply', 'reactions': [{'message_id': 1, 'emoji': ':nope:'}]})),
+                            {'finish_reason': 'stop', 'message': {'content': 'That emoji didn’t work.'}})
         bot, store, channels = setup(tmp_path, provider, clock)
         source = human(channels[100], '<@9> react please', ping=True)
         async def reject(emoji):
@@ -436,9 +437,10 @@ def test_rejected_emoji_does_not_fail_a_delivered_reply(tmp_path):
             await bot.on_message(source)
             assert store.db.execute('SELECT state FROM jobs').fetchall() == [('complete',)]
             assert store.db.execute('SELECT state,kind FROM deliveries ORDER BY part').fetchall() == [
-                ('sent', 'message'), ('failed', 'reaction')]
+                ('sent', 'message'), ('failed', 'reaction'), ('sent', 'message')]
             assert store.previous(100) is not None
-            assert [c['content'] for c in channels[100].sent_calls] == ['A reply']
+            assert [c['content'] for c in channels[100].sent_calls] == ['A reply', 'That emoji didn’t work.']
+            assert channels[100].sent_calls[-1]['reference'] is None
         finally:
             await bot.close()
             store.db.close()

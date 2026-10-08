@@ -10,6 +10,7 @@ import stat
 import uuid
 
 from .sandbox import Sandbox
+from .filesystem import filesystem_call
 
 
 @dataclass
@@ -143,7 +144,7 @@ class Job:
         return {'path': str(destination.relative_to(self.work)), 'bytes': len(data)}
 
     async def execute(self, command, timeout=None):
-        self.check_storage()
+        await filesystem_call(self.check_storage)
         logs = self.root / 'logs'
         logs.mkdir(exist_ok=True)
         log_id = 'log:' + uuid.uuid4().hex
@@ -153,7 +154,7 @@ class Job:
         result['log'] = log_id
         return result
 
-    def open_job(self, job_id):
+    def previous_job_info(self, job_id):
         if not re.fullmatch(r'[0-9a-f]{32}', job_id) or job_id == self.id:
             raise ValueError('Invalid previous job ID')
         row = self.store.db.execute('SELECT channel,actor,state,detail FROM jobs WHERE id=?', (job_id,)).fetchone()
@@ -161,6 +162,11 @@ class Job:
             raise ValueError('Job is outside your channel and requester scope')
         if row[2] in ('running', 'delivering'):
             raise ValueError('Previous job is still running')
+        receipts = self.store.db.execute('SELECT name,result FROM tool_receipts WHERE job=? ORDER BY rowid', (job_id,)).fetchall()
+        return {'state': row[2], 'detail': row[3],
+                'receipts': [{'tool': name, 'result': json_result(result)} for name, result in receipts]}
+
+    def copy_job_files(self, job_id):
         source = self.store.root / 'jobs' / str(int(self.channel)) / job_id / 'work'
         if not source.is_dir() or source.is_symlink():
             raise ValueError('Previous workspace has expired or is unavailable')
@@ -189,9 +195,17 @@ class Job:
                 destination = target / path.relative_to(source)
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(path, destination, follow_symlinks=False)
-        receipts = self.store.db.execute('SELECT name,result FROM tool_receipts WHERE job=? ORDER BY rowid', (job_id,)).fetchall()
-        return {'path': str(target.relative_to(self.work)), 'state': row[2], 'detail': row[3],
-                'receipts': [{'tool': name, 'result': json_result(result)} for name, result in receipts]}
+        return str(target.relative_to(self.work))
+
+    def open_job(self, job_id):
+        info = self.previous_job_info(job_id)
+        return {'path': self.copy_job_files(job_id), **info}
+
+    async def aopen_job(self, job_id):
+        # SQLite stays on its owning thread; only filesystem work is offloaded.
+        info = self.previous_job_info(job_id)
+        path = await filesystem_call(self.copy_job_files, job_id)
+        return {'path': path, **info}
 
     async def get_attachment(self, attachment_id):
         if attachment_id not in self.attachments:
@@ -201,7 +215,7 @@ class Job:
         attachment = self.attachments[attachment_id]
         if attachment.size > self.settings['file_bytes']:
             raise ValueError('Attachment exceeds the configured size limit')
-        self.check_storage(attachment.size)
+        await filesystem_call(self.check_storage, attachment.size)
         # Do not use user-controlled filenames or model paths for downloads.
         basename = re.sub(r'[^A-Za-z0-9._-]', '_', attachment.filename)[:100] or 'attachment'
         path = self.path(f'inputs/{uuid.uuid4().hex[:8]}-{basename}', create_parent=True)
@@ -209,7 +223,7 @@ class Job:
             await attachment.download(path, self.settings['file_bytes'])
             with self.open_read(str(path.relative_to(self.work))):
                 pass
-            self.check_storage()
+            await filesystem_call(self.check_storage)
         except BaseException:
             path.unlink(missing_ok=True)
             raise

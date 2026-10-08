@@ -28,6 +28,8 @@ def test_long_reply_attaches_files_once_and_only_references_first_message(tmp_pa
         def __init__(self): self.step = 0
         async def complete(self, messages, **kwargs):
             self.step += 1
+            if '<turn_error>' in messages[-1]['content']:
+                return {'finish_reason': 'stop', 'message': {'content': 'The rest didn’t send.'}}
             if self.step == 1:
                 return response(call('write_file', {'path': 'a.txt', 'content': 'A'}, 'a'),
                                 call('write_file', {'path': 'b.txt', 'content': 'B'}, 'b'))
@@ -39,7 +41,14 @@ def test_long_reply_attaches_files_once_and_only_references_first_message(tmp_pa
         cfg, store, channel = config(), Store(tmp_path, 'rowan'), Channel()
         cfg['memory']['enabled'] = False
         if fail_continuation:
-            async def fail(**kwargs): raise RuntimeError('Continuation failed')
+            original_send = channel.send
+            attempts = 0
+            async def fail(**kwargs):
+                nonlocal attempts
+                attempts += 1
+                if attempts == 1:
+                    raise RuntimeError('Continuation failed')
+                return await original_send(**kwargs)
             channel.send = fail
         bot = CharacterBot(cfg, store, Provider())
         bot._connection.user = NS(id=9)
@@ -54,9 +63,10 @@ def test_long_reply_attaches_files_once_and_only_references_first_message(tmp_pa
             outgoing = [m for m in channel.messages.values() if m.author.bot]
             if fail_continuation:
                 assert states == [('failed',)]
-                assert [row[0] for row in receipts] == ['sent', 'started']
+                assert [row[0] for row in receipts] == ['sent', 'started', 'sent']
                 assert not store.previous(100)
-                assert outgoing[0].attachments and 'couldn’t complete' in outgoing[-1].content
+                assert outgoing[0].attachments and outgoing[-1].content == 'The rest didn’t send.'
+                assert outgoing[-1].reference is None and not outgoing[-1].attachments
             else:
                 assert states == [('complete',)]
                 assert len(outgoing) == 3

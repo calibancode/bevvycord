@@ -73,7 +73,7 @@ class Sandbox:
 
         async def monitor():
             while process.returncode is None:
-                check_storage()
+                await asyncio.to_thread(check_storage)
                 await asyncio.sleep(0.1)
 
         reader, watcher = asyncio.create_task(drain()), asyncio.create_task(monitor())
@@ -106,7 +106,7 @@ class Sandbox:
             finally:
                 if log_file:
                     log_file.close()
-        check_storage()
+        await asyncio.to_thread(check_storage)
         output = captured.decode('utf-8', errors='replace')[:self.settings['output_chars']]
         return {'status': status, 'exit_code': process.returncode, 'output': output,
                 'log_truncated': bool(log_file and total > logged),

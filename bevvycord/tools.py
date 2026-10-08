@@ -1,6 +1,7 @@
 """Small tool registry and trusted, explicitly enabled Python plugin interface."""
 from dataclasses import dataclass
 import importlib
+from .filesystem import filesystem_call
 from jsonschema import Draft202012Validator
 
 
@@ -57,11 +58,11 @@ async def execute(context, command, timeout_seconds=None):
 
 
 async def read_file(context, path, offset_bytes=0):
-    return context.read_file(path, offset_bytes)
+    return await filesystem_call(context.read_file, path, offset_bytes)
 
 
 async def write_file(context, path, content):
-    return context.write_file(path, content)
+    return await filesystem_call(context.write_file, path, content)
 
 
 async def get_attachment(context, attachment_id):
@@ -69,7 +70,7 @@ async def get_attachment(context, attachment_id):
 
 
 async def return_file(context, path, filename=None):
-    return context.return_file(path, filename)
+    return await filesystem_call(context.return_file, path, filename)
 
 
 async def remember(context, note, message_ids=None):
@@ -81,7 +82,7 @@ async def forget(context, note, message_ids=None):
 
 
 async def open_job(context, job_id):
-    return context.open_job(job_id)
+    return await context.aopen_job(job_id)
 
 
 async def finish(context, text=None, reply_to=None, reactions=()):
@@ -101,7 +102,8 @@ def builtin_registry(settings, memory_enabled):
                                 'message_id': {'type': 'integer', 'minimum': 1},
                                 'emoji': {**text, 'maxLength': 100}}, ['message_id', 'emoji'])}}), finish)
     if settings['sandbox_enabled']:
-        registry.add('exec', 'Run shell/Python/system tools in the isolated /workspace. No network: curl/wget/pip fail; use web tools, if offered, to download. Output is bounded.',
+        registry.add('exec', 'Run shell/Python/system tools in the isolated /workspace. No network: curl/wget/pip fail; use web tools, if offered, to download. Output is bounded. '
+                     f'Virtual address-space limit: {settings["memory_mb"]} MiB; runtimes reserving large mappings may fail.',
                      arguments({'command': {**text, 'maxLength': 20000},
                                 'timeout_seconds': {'type': 'integer', 'minimum': 1, 'maximum': settings['exec_seconds']}}, ['command']), execute)
         registry.add('read_file', 'Read a UTF-8 workspace file or an execution log handle (bounded output). Offset is in bytes.',

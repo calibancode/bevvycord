@@ -198,9 +198,13 @@ applies the cap again. A trigger received during generation is queued, but its
 history ends at its own posting position, excluding a later answer it hadn't seen.
 
 `context.soft_chunks` and `hard_chunks` are configurable; hard must be at least
-twice soft. Independent fetch/character bounds prevent unbounded requests. If a
-whole requested chunk cannot be obtained within the fetch bound, or a prompt is
-too large, the bot reports failure rather than silently clipping the context.
+twice soft. Independent fetch/character bounds prevent unbounded requests. A
+bounded lookahead distinguishes a complete channel from a cut-off speaker run.
+When the fetch limit prevents obtaining whole requested chunks, use bounded recent
+context with an explicit omission note instead of refusing to reply. That window
+starts fresh rather than accumulating an indefinitely long monologue from old
+snapshots. Skipped system messages count toward the fetch bound. An oversized
+prompt still fails rather than silently clipping it.
 
 The character prompt and context instructions stay fixed. Memory and each labelled
 Discord message have separate API-message boundaries; changing job details come
@@ -315,6 +319,25 @@ DeepSeek tool exchanges preserve `reasoning_content` on replay as required by it
 [thinking-mode protocol](https://api-docs.deepseek.com/guides/thinking_mode/).
 Schemas have a stable order and the working transcript grows within the turn;
 cache usage is logged on each request. Tools do not add permanent model chat history.
+
+The example configuration gives reply and memory requests a `max_tokens` allowance
+of 65,536, including reasoning. This is an upper bound, not a requested reply
+length; the character prompt controls how much it says. Existing configurations
+with explicit lower limits retain them until edited.
+
+Tool errors are returned to the ongoing model turn so the character can adapt.
+If a turn fails outside that path, an invoked character gets one additional,
+text-only request to explain the problem in its own voice. Recovery uses the
+last complete working exchange when it fits, otherwise the original conversation
+or a bounded current-request context. Raw library errors are reduced to safe
+categories; authentication failures skip retrying the same credentials. Recovery
+does not dispatch tools, resend files or replay uncertain deliveries. Its output
+has a separate delivery receipt; the failed job and original receipts remain for
+inspection. A failed optional reaction can be explained while retaining the
+already completed reply. Silent scheduled check-ins stay quiet on failure.
+Only failed recovery falls back to the generic error notice. Recovery has a
+separate timeout of at most 60 seconds and does not commit a failed turn's context
+checkpoint. Its Discord text is visible to subsequent history reads.
 
 `remember` ("Bevvy likes eating shoes") and `forget` ("Bevvy's home address") store
 a short dated note with its requester and source message IDs, then queue a memory

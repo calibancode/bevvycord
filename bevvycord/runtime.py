@@ -2,6 +2,7 @@
 import asyncio
 from dataclasses import dataclass
 import json
+from .recovery import TurnError
 
 
 @dataclass
@@ -26,6 +27,7 @@ class Runtime:
     async def _run(self, messages, job):
         scratch = [dict(m) for m in messages]
         scratch.append({'role': 'user', 'content': '<job>\n' + job.environment() + '\n</job>'})
+        job.recovery_messages = [dict(m) for m in scratch]
         count = 0
         for step in range(self.settings['max_steps']):
             finishing = step == self.settings['max_steps'] - 1 or count >= self.settings['max_calls']
@@ -41,14 +43,14 @@ class Runtime:
                 else:
                     options['tool_choice'] = 'none'
             if len(json.dumps(scratch, ensure_ascii=False)) > self.settings['max_working_chars']:
-                raise RuntimeError('Tool working context limit reached')
+                raise TurnError('Tool working context limit reached')
             choice = await self.provider.complete(scratch, **options)
             raw = choice.get('message', {})
             calls = raw.get('tool_calls')
             if not calls:
                 content = raw.get('content')
                 if choice.get('finish_reason') not in ('stop', 'end_turn') or not isinstance(content, str) or not content.strip():
-                    raise RuntimeError('Provider did not complete the final answer')
+                    raise TurnError('Provider did not complete the final answer')
                 return Result(content, job)
             if finishing and (not isinstance(calls, list) or len(calls) != 1
                               or tool_name(calls[0]) != 'finish'):
@@ -56,17 +58,17 @@ class Runtime:
                 content = raw.get('content')
                 if isinstance(content, str) and content.strip():
                     return Result(content, job)
-                raise RuntimeError('Provider requested work tools during the final reply; no further tools were executed')
+                raise TurnError('Provider requested work tools during the final reply; no further tools were executed')
             if (choice.get('finish_reason') not in ('tool_calls', 'stop') or not isinstance(calls, list)
                     or len(calls) > self.settings['max_calls'] + 1):
-                raise RuntimeError('Malformed provider tool response')
+                raise TurnError('Malformed provider tool response')
             # Preserve DeepSeek reasoning_content verbatim on assistant replay.
             # It is never written to the transcript, receipts or Discord.
             seen = set()
             for call in calls:
                 call_id = call.get('id') if isinstance(call, dict) else None
                 if not isinstance(call_id, str) or not call_id or len(call_id) > 200 or call_id in seen:
-                    raise RuntimeError('Malformed or repeated tool call ID in one response')
+                    raise TurnError('Malformed or repeated tool call ID in one response')
                 seen.add(call_id)
             assistant = {k: v for k, v in raw.items() if k in ('role', 'content', 'tool_calls', 'reasoning_content')}
             assistant['role'] = 'assistant'
@@ -86,9 +88,12 @@ class Runtime:
                 if len(encoded) > self.settings['output_chars'] + 2000:
                     encoded = json.dumps({'error': 'Tool result exceeded output limit', 'preview': encoded[:self.settings['output_chars']]}, ensure_ascii=False)
                 scratch.append({'role': 'tool', 'tool_call_id': call_id, 'content': encoded})
+            # Only save complete protocol exchanges. A malformed response or an
+            # interrupted batch must not create orphaned tool calls on recovery.
+            job.recovery_messages = [dict(m) for m in scratch]
             if job.decision is not None:
                 return Result(job.decision['text'], job)
-        raise RuntimeError('Model step limit reached without a final answer')
+        raise TurnError('Model step limit reached without a final answer')
 
     async def dispatch(self, job, call):
         function = call.get('function', {})

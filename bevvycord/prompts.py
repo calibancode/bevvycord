@@ -32,6 +32,10 @@ def reply_messages(prompt, speaker_id, window, memory=None):
                              'Some intervening messages are omitted; the recent conversation follows.]'})
         messages.append({'role': 'user', 'content': '<conversation>\n'
                          + transcript(Window([message])) + '\n</conversation>'})
+    if window.history_limited:
+        messages.append({'role': 'user', 'content':
+                         '[Context note: The channel-history fetch limit was reached. '
+                         'Earlier conversation is omitted; the oldest speaker run may be partial.]'})
     return messages
 
 MEMORY_REQUESTS = """Memory requests are notes made during conversation, attributed to whoever asked. A remember request is something to keep. A forget request names something to leave out: remove it, and never write that you were asked to forget it, since that line would preserve it. A later request or later conversation can bring it back. A request about someone other than the requester is the requester's wish, not theirs; weigh it in character."""

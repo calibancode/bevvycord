@@ -25,6 +25,7 @@ class Window:
     gap_before: int | None = None
     last_response_id: int | None = None
     last_seen_id: int | None = None
+    history_limited: bool = False
 
     def dumps(self):
         return json.dumps(asdict(self), ensure_ascii=False)

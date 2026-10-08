@@ -11,7 +11,7 @@ import httpx
 import discord
 
 from .config import tool_settings
-from .context import chunks, select_window
+from .context import chunks, select_window, Window
 from .jobs import Attachment, Job, clean_jobs
 from .invite import invite_url
 from .runtime import Runtime
@@ -19,6 +19,7 @@ from .tools import builtin_registry
 from .discord_io import delivery_parts, is_trigger, normalize, reaction_snapshot, speaker_name
 from .memory import update_memory
 from .prompts import reply_messages
+from .recovery import recover, TurnError, explanation
 
 log = logging.getLogger(__name__)
 
@@ -40,6 +41,7 @@ class CharacterBot(discord.Client):
         initiative = config.get('initiative', {})
         self.initiative_channels = set(initiative.get('channel_ids', ())) if initiative.get('enabled', False) else set()
         self.history_objects = {}
+        self.history_limits = {}
         self.capacity = asyncio.Semaphore(self.tool_settings['max_parallel'])
         if self.tool_settings['enabled']:
             registry = builtin_registry(self.tool_settings, config.get('memory', {}).get('enabled', False))
@@ -75,10 +77,15 @@ class CharacterBot(discord.Client):
         settings = self.config['context']
         newest = [normalize(trigger)]
         objects = self.history_objects[trigger.channel.id] = {trigger.id: trigger}
+        self.history_limits[trigger.channel.id] = False
         group_count = 1
         fetched = 1
-        async for message in trigger.channel.history(before=trigger, limit=settings['max_fetch_messages'] - 1):
+        # One lookahead distinguishes an exhausted channel from a cut-off run.
+        async for message in trigger.channel.history(before=trigger, limit=settings['max_fetch_messages']):
             fetched += 1
+            if fetched > settings['max_fetch_messages']:
+                self.history_limits[trigger.channel.id] = True
+                break
             if message.type not in (discord.MessageType.default, discord.MessageType.reply):
                 continue
             item = normalize(message)
@@ -88,11 +95,9 @@ class CharacterBot(discord.Client):
             newest.append(item)
             if group_count > settings['hard_chunks']:
                 break
-        if fetched >= settings['max_fetch_messages'] and group_count <= settings['soft_chunks']:
-            raise ValueError('Fetch limit reached inside the requested chunks; increase context.max_fetch_messages')
         # If the limit cut the oldest group, exclude that incomplete group.
         ordered = list(reversed(newest))
-        if fetched >= settings['max_fetch_messages'] and group_count <= settings['hard_chunks']:
+        if self.history_limits[trigger.channel.id] and settings['soft_chunks'] < group_count <= settings['hard_chunks']:
             ordered = [m for group in chunks(ordered)[1:] for m in group]
         return ordered
 
@@ -159,7 +164,7 @@ class CharacterBot(discord.Client):
                              or (message.guild is not None and not isinstance(message.channel, discord.Thread)
                                  and message.channel.id in cfg['allowed_channel_ids'])))
             reference_id = getattr(message.reference, 'message_id', None)
-            if not eligible or not reference_id:
+            if not eligible or not reference_id or getattr(message.reference, 'resolved', None) is not None:
                 return
             try:
                 referenced = await message.channel.fetch_message(reference_id)
@@ -244,7 +249,7 @@ class CharacterBot(discord.Client):
         return found
 
     async def respond(self, message, initiative=False, activity_revision=None):
-        cfg, job = self.config, None
+        cfg, job, messages, reaction_error = self.config, None, None, None
         channel_id = message.channel.id
         self.store.note_invocation(channel_id)
         if self.runtime:
@@ -256,7 +261,12 @@ class CharacterBot(discord.Client):
                     history = await self.history(message)
                     previous = await self.refresh_previous(message.channel, self.store.previous(channel_id), history)
                     settings = cfg['context']
-                    window = select_window(history, previous, settings['soft_chunks'], settings['hard_chunks'])
+                    limited = self.history_limits.get(channel_id, False)
+                    # Do not grow an indefinitely long single-speaker run by
+                    # joining older snapshots back onto a bounded fetch.
+                    window = select_window(history, None if limited else previous,
+                                           settings['soft_chunks'], settings['hard_chunks'])
+                    window.history_limited = limited
                     await self.refresh_reactions(message.channel, window)
                     memory = self.store.memory(channel_id) if cfg.get('memory', {}).get('enabled', False) else None
                     messages = reply_messages(cfg['character']['prompt'], self.user.id, window, memory)
@@ -323,10 +333,11 @@ class CharacterBot(discord.Client):
                         self.store.delivery(job.id, index, source.id, kind='reaction', emoji=emoji, state='started')
                         try:
                             await source.add_reaction(emoji)
-                        except discord.HTTPException:
+                        except discord.HTTPException as exc:
                             # Usually an unknown emoji; the reply is already sent.
                             log.warning('Could not add reaction to message %s', source.id)
                             self.store.delivery(job.id, index, source.id, kind='reaction', emoji=emoji, state='failed')
+                            reaction_error = TurnError(f'Discord could not add a reaction (HTTP {exc.status}, code {exc.code})')
                             continue
                         self.store.delivery(job.id, index, source.id, kind='reaction', emoji=emoji)
                         # Record our acknowledged action even before gateway delivery.
@@ -348,6 +359,12 @@ class CharacterBot(discord.Client):
                             self.store.scanned_attention(channel_id, message.id)
                     if job:
                         self.store.job_state(job.id, 'complete')
+            if reaction_error and not initiative:
+                recovered = await self.recover_failure(message, messages, job, reaction_error)
+                if recovered:
+                    window.messages.extend(recovered)
+                    window.last_response_id = window.last_seen_id = recovered[-1].id
+                    self.store.complete(channel_id, window, datetime.now(timezone.utc).isoformat())
         except asyncio.CancelledError:
             if job:
                 self.store.job_state(job.id, 'cancelled')
@@ -360,23 +377,76 @@ class CharacterBot(discord.Client):
             raise
         except Exception as exc:
             if job:
-                # Only our own messages are stored; other exceptions may embed secrets.
-                detail = type(exc).__name__
-                if isinstance(exc, (ValueError, RuntimeError)) and str(exc):
-                    detail += f': {str(exc)[:300]}'
+                # Library exceptions can embed secrets even in ValueError or
+                # RuntimeError; use the same safe explanation as model recovery.
+                detail = f'{type(exc).__name__}: {explanation(exc)[:300]}'
                 self.store.job_state(job.id, 'failed', detail)
             log.error('Reply failed in channel %s (%s)', channel_id, type(exc).__name__)
             if not initiative:
-                try:
-                    detail = f' Job {job.id} remains available for inspection.' if job else ''
-                    await self.notice(message, 'I couldn’t complete that reply. Please try again; check the bot log if it keeps happening.' + detail)
-                except discord.HTTPException:
-                    pass
+                if not await self.recover_failure(message, messages, job, exc):
+                    try:
+                        detail = f' Job {job.id} remains available for inspection.' if job else ''
+                        text = 'I couldn’t complete that reply. Please try again; check the bot log if it keeps happening.' + detail
+                        if job and self.store.db.execute('SELECT 1 FROM deliveries WHERE job=? LIMIT 1', (job.id,)).fetchone():
+                            await message.channel.send(content=text, allowed_mentions=discord.AllowedMentions.none())
+                        else:
+                            await self.notice(message, text)
+                    except (discord.HTTPException, RuntimeError):
+                        pass
             if isinstance(exc, (ValueError, RuntimeError)):
-                log.error('%s', exc)
+                log.error('%s', explanation(exc))
         finally:
             self.active.pop(channel_id, None)
             self.history_objects.pop(channel_id, None)
+            self.history_limits.pop(channel_id, None)
+
+    async def recover_failure(self, message, messages, job, error):
+        """Explain a failed turn once, without reusing staged actions or files."""
+        try:
+            async with asyncio.timeout(min(60, self.tool_settings['turn_seconds'])):
+                current = await message.channel.fetch_message(message.id)
+                snapshot = replace(normalize(current), name='')
+                changed = snapshot != replace(normalize(message), name='')
+                if (not messages or changed or sum(len(m['content']) for m in messages)
+                        > self.config['context']['max_prompt_chars']):
+                    messages = reply_messages(self.config['character']['prompt'], self.user.id,
+                                              Window([normalize(current)]))
+                    if job:
+                        job.recovery_messages = None
+                if sum(len(m['content']) for m in messages) > self.config['context']['max_prompt_chars']:
+                    return False
+                async with message.channel.typing():
+                    answer = await recover(self.provider, messages, job, error,
+                                           self.tool_settings['max_working_chars'])
+                # Edits/deletions during the recovery also invalidate its output.
+                fresh = await message.channel.fetch_message(message.id)
+                if replace(normalize(fresh), name='') != snapshot:
+                    return False
+                existing = self.store.db.execute('SELECT part,state FROM deliveries WHERE job=? ORDER BY part',
+                                                (job.id,)).fetchall() if job else []
+                part = max((p for p, _ in existing), default=-1) + 1
+                # A started delivery may have reached Discord even if its ID
+                # was lost. Continue plainly rather than issuing another reply.
+                continuation = bool(existing)
+                delivered = []
+                for piece, _ in delivery_parts(answer):
+                    if job:
+                        self.store.delivery(job.id, part)
+                    options = {'content': piece, 'allowed_mentions': discord.AllowedMentions.none()}
+                    if continuation:
+                        sent = await message.channel.send(**options)
+                    else:
+                        sent = await fresh.reply(**options, mention_author=False)
+                    if job:
+                        self.store.delivery(job.id, part, sent.id)
+                    self.store.update(message.channel.id, normalize(sent))
+                    delivered.append(normalize(sent))
+                    continuation = True
+                    part += 1
+                return delivered
+        except Exception as exc:
+            log.warning('Character recovery failed in channel %s (%s)', message.channel.id, type(exc).__name__)
+            return False
 
     async def on_raw_message_delete(self, payload):
         if payload.channel_id in self.locks:

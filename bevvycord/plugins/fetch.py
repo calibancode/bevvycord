@@ -14,6 +14,7 @@ import httpcore
 import httpx
 
 from bevvycord.tools import arguments
+from bevvycord.filesystem import filesystem_call
 
 
 def public_address(value):
@@ -133,7 +134,7 @@ async def fetch(context, url):
     try:
         async with asyncio.timeout(min(60, context.settings['turn_seconds'])):
             current = web_url(url)
-            context.check_storage()
+            await filesystem_call(context.check_storage)
             async with httpx.AsyncClient(transport=PublicTransport(), trust_env=False,
                                          timeout=httpx.Timeout(20, connect=10), follow_redirects=False,
                                          headers={'User-Agent': 'bevvycord/1.0', 'Accept-Encoding': 'identity'}) as client:
@@ -166,10 +167,10 @@ async def fetch(context, url):
                                 size += len(chunk)
                                 if size > maximum:
                                     raise ValueError('Web file exceeds the configured size limit')
-                                context.check_storage(len(chunk))
+                                await filesystem_call(context.check_storage, len(chunk))
                                 output.write(chunk)
                                 output.flush()
-                        context.check_storage()
+                        await filesystem_call(context.check_storage)
                         result = {'path': str(destination.relative_to(context.work)), 'url': str(current),
                                   'content_type': content_type[:100], 'bytes': size}
                         is_html = content_type in ('text/html', 'application/xhtml+xml')
@@ -188,7 +189,7 @@ async def fetch(context, url):
                                 result['text_truncated'] = len(encoded) > maximum
                                 text_path = result['path'] + '.txt'
                                 text_destination = context.path(text_path)
-                                context.write_file(text_path, text)
+                                await filesystem_call(context.write_file, text_path, text)
                                 result['text_path'] = text_path
                             excerpt_limit = min(context.settings['output_chars'], 6000)
                             result.update(excerpt=text[:excerpt_limit], excerpt_truncated=len(text) > excerpt_limit,

@@ -40,6 +40,20 @@ File handles are closed even on failed uploads. Delivery receipts track each
 combined message, and the archive records attachments alongside that message's
 text. A failure after an earlier message was sent preserves those receipts.
 
+Turn failures get one additional text-only character explanation, bounded to 60
+seconds, outside the ordinary request count. Runtime preserves the last complete
+protocol exchange for this request, excluding orphaned/malformed tool calls and
+truncated answers. If it exceeds the working-context limit, recovery uses the
+original bounded conversation instead. Safe error categories and scoped receipt
+states explain what stopped and which effects may already have happened. No tools
+are offered and `tool_choice: "none"` prevents new calls. Returned tool calls or
+incomplete recovery text are rejected. Staged files and earlier deliveries are
+never retried; recovery receipts start after existing parts, including uncertain
+ones. After any delivery attempt, explanation messages continue without another
+reply reference. Failed jobs keep their state and do not advance the successful
+window. If the model cannot explain, a generic notice is attempted. Explicit
+cancellation and silent check-ins do not start recovery requests.
+
 Exact `status`/`cancel` human commands bypass the work queue. A requester can cancel
 their own active job; shutdown cancels all work. Memory writing acquires the same
 channel lock, runs after jobs settle, and follows the existing retry schedule.
@@ -107,6 +121,12 @@ Address-space/CPU limits apply per process; this backend does not provide an
 aggregate cgroup memory/CPU quota. The process limit also depends on Linux's
 per-user accounting. Workspace size/count are monitored every 100 ms and checked
 after execution; this is an overshoot-detecting limit, not a filesystem quota.
+Filesystem walks run in worker threads so they do not block gateway handling.
+File-tool work also runs off the loop, while SQLite stays on its owning thread;
+cancelled writes settle before the job is released. The address-space bound
+includes reserved virtual mappings, so some JVM/V8/BLAS builds can fail despite
+low resident memory. It is configurable through `tools.memory_mb` and disclosed
+in the exec schema; Python is not the only supported runtime.
 Use a dedicated OS account/volume with hard quotas if those are required. `/usr`
 comes from the operator's host, so installed utilities/libraries and distro layout
 are part of the runtime environment. A pinned container image can be a later backend.

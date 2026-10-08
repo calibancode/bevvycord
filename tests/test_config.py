@@ -32,3 +32,17 @@ def test_config_rejects_ambiguous_permissions_and_limits(tmp_path, section, key,
     path.write_text(yaml.safe_dump(cfg))
     with pytest.raises(ValueError):
         load_config(path)
+
+
+def test_quoted_ids_are_consistent_and_default_token_limit_supports_thinking(tmp_path):
+    cfg = yaml.safe_load(Path('config.example.yaml').read_text())
+    cfg['allowed_channel_ids'] = ['100', 200]
+    cfg['tools']['enabled'] = True
+    cfg['initiative'].update(enabled=True, channel_ids=['100'])
+    path = tmp_path / 'config.yaml'
+    path.write_text(yaml.safe_dump(cfg))
+    loaded = load_config(path)
+    assert loaded['allowed_channel_ids'] == {100, 200}
+    assert loaded['initiative']['channel_ids'] == {100}
+    assert loaded['provider']['parameters']['max_tokens'] == 65536
+    assert loaded['memory']['parameters']['max_tokens'] == 65536

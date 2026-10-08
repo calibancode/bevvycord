@@ -70,9 +70,9 @@ def load_config(path):
     if type(interval) not in (int, float) or not 0 < interval < float('inf'):
         raise ValueError('initiative.interval_minutes must be a positive finite number')
     channels = initiative.setdefault('channel_ids', [])
-    if not isinstance(channels, list) or any(type(i) is not int or i < 1 for i in channels):
+    if not isinstance(channels, list) or any(isinstance(i, bool) or not str(i).isdigit() or int(i) < 1 for i in channels):
         raise ValueError('initiative.channel_ids must be a list of positive Discord IDs')
-    initiative['channel_ids'] = set(channels)
+    initiative['channel_ids'] = {int(i) for i in channels}
     if not initiative['channel_ids'].issubset(cfg['allowed_channel_ids']):
         raise ValueError('initiative channels must also be allowed channels')
     if initiative['enabled'] and (not cfg['tools'].get('enabled', False) or not channels):

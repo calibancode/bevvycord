@@ -20,7 +20,7 @@ provider:
   model: deepseek-flash # Or deepseek-v4-pro.
   timeout_seconds: 180
   parameters:
-    max_tokens: 4096
+    max_tokens: 65536 # Includes reasoning; character instructions control reply length.
 
 context:
   soft_chunks: 20
@@ -39,7 +39,7 @@ memory:
   retry_minutes: 30
   model: deepseek-flash
   parameters:
-    max_tokens: 4096
+    max_tokens: 65536
   # If the archive exceeds this bound, skip and report it; never silently discard it.
   max_archive_chars: 800000
 

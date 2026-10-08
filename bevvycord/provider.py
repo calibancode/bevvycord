@@ -1,6 +1,7 @@
 import logging
 import os
 import httpx
+from .recovery import ProviderError, TurnError
 
 log = logging.getLogger(__name__)
 
@@ -20,10 +21,10 @@ class Provider:
     async def generate(self, messages, model=None, parameters=None):
         choice = await self.complete(messages, model=model, parameters=parameters)
         if choice.get('finish_reason') not in ('stop', 'end_turn'):
-            raise RuntimeError('Provider did not complete the answer; adjust output limits')
+            raise TurnError('Provider did not complete the answer; adjust output limits')
         content = choice['message'].get('content')
         if not isinstance(content, str) or not content.strip():
-            raise RuntimeError('Provider returned an empty answer')
+            raise TurnError('Provider returned an empty answer')
         return content
 
     async def complete(self, messages, model=None, parameters=None, tools=None, tool_choice=None):
@@ -40,7 +41,7 @@ class Provider:
         })
         # Avoid logging HTTP bodies, headers, or exception objects containing secrets.
         if response.is_error:
-            raise RuntimeError(f'Provider returned HTTP {response.status_code}')
+            raise ProviderError(response.status_code)
         data = response.json()
         choice = data['choices'][0]
         usage = data.get('usage', {})

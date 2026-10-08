@@ -112,6 +112,9 @@ def run_file_memory_flow(tmp_path, monkeypatch, real_exec=False, fail_delivery=F
                 return response(call('return_file', {'path': 'output.txt'}, 'stage'),
                                 call('remember', {'note': 'Bevvy prefers text files', 'message_ids': [trigger.id]}, 'memory'))
             if step == 5: return FINAL
+            if '<turn_error>' in messages[-1]['content']:
+                assert kwargs['tool_choice'] == 'none'
+                return {'finish_reason': 'stop', 'message': {'content': 'Couldn’t upload the file.'}}
             assert all(m['role'] in ('system', 'user') for m in messages)
             assert 'PRIVATE INTERNAL REASONING' not in str(messages)
             return FINAL
@@ -127,13 +130,15 @@ def run_file_memory_flow(tmp_path, monkeypatch, real_exec=False, fail_delivery=F
         bot._connection.user = NS(id=9)
         try:
             await bot.on_message(trigger)
-            assert len(requests) == 5
+            assert len(requests) == (6 if fail_delivery else 5)
             states = store.db.execute('SELECT state FROM jobs').fetchall()
             if fail_delivery:
                 assert states == [('failed',)]
                 assert not store.previous(100)
                 deliveries = store.db.execute('SELECT state FROM deliveries ORDER BY part').fetchall()
-                assert deliveries == [('started',)]
+                assert deliveries == [('started',), ('sent',)]
+                assert channel.sent_calls[-1]['content'] == 'Couldn’t upload the file.'
+                assert not channel.sent_calls[-1]['files'] and channel.sent_calls[-1]['reference'] is None
                 assert all(f.fp.closed for call in channel.sent_calls for f in call['files'])
                 assert store.has_pending_notes(100)
                 assert store.due_memory_channels(cfg['memory']) == ['100']
