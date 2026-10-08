@@ -61,7 +61,7 @@ def test_optional_checkin_silence_and_no_repeated_or_bot_wakeups(tmp_path):
             clock[0] += 1
             await bot.initiative_tick()
             assert len(provider.requests) == 1
-            assert 'You have some time to yourself.' in provider.requests[0][-1]['content']
+            assert 'You have time to yourself.' in provider.requests[0][-1]['content']
             assert 'testing only' not in str(provider.requests[0])
             assert not main.sent_calls and not testing.sent_calls
             assert store.previous(100).last_seen_id == message.id

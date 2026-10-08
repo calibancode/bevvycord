@@ -51,16 +51,18 @@ class Job:
 
     def environment(self):
         inventory = '\n'.join(f'{a.id}: {a.filename!r} ({a.size} bytes)' for a in self.attachments.values()) or '(none)'
-        return ('Tools work privately during this turn; only your final reply, returned files and chosen reactions go to Discord. '
+        return ('Tools work privately during this turn. You may use multiple tools before finishing. '
+                'Only your final reply, returned files and chosen reactions go to Discord. '
+                '`finish` ends your turn; call it without arguments to leave no message or reaction. '
+                'You can finish without speaking. '
                 'Tool results are working material. Use /workspace for files; get_attachment uses the listed IDs; '
                 'return_file stages a file for your final reply. Shell execution has no network.\n'
                 f'Tool budget: {self.settings["max_steps"] - 1} working model requests, '
                 f'{self.settings["max_calls"]} tool calls; stage files before your final reply.\n'
                 f'Job ID: {self.id}\nAttachments available in this conversation:\n{inventory}'
-                + ('\nYou have some time to yourself. Nobody is asking you for anything. '
-                   'You may pursue your interests or unfinished business, use tools privately, '
-                   'join the conversation, or do nothing. There is no obligation to act. '
-                   'Use finish when you’re done.\nCheck-in time: '
+                + ('\nYou’re catching up on the channel without being summoned. You have time to yourself. '
+                   'You may participate in conversation, pursue your own interests, use tools privately, '
+                   'remember something worthwhile, or do nothing. Nothing is required of you.\nCheck-in time: '
                    + datetime.fromtimestamp(self.store.clock(), timezone.utc).isoformat() if self.initiative else
                    '\nSomeone is addressing you. Respond to their latest message.'))
 
