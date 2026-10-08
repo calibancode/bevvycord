@@ -10,7 +10,7 @@ import httpx
 
 import discord
 
-from .config import tool_settings
+from .config import tool_settings, library_settings
 from .context import chunks, select_window, Window
 from .jobs import Attachment, Job, clean_jobs
 from .invite import invite_url
@@ -25,12 +25,15 @@ log = logging.getLogger(__name__)
 
 
 class CharacterBot(discord.Client):
-    def __init__(self, config, store, provider):
+    def __init__(self, config, store, provider, coordinator=None):
         intents = discord.Intents.default()
         intents.message_content = True
         intents.reactions = True
         super().__init__(intents=intents, allowed_mentions=discord.AllowedMentions.none())
         self.config, self.store, self.provider = config, store, provider
+        from .coordinator import ChannelCoordinator
+        self.coordinator = coordinator or ChannelCoordinator(pause_seconds=0)
+        self.initiative_task = None
         self.locks = {channel: asyncio.Lock() for channel in config['allowed_channel_ids']}
         self.memory_task = None
         self.cleanup_task = None
@@ -43,20 +46,24 @@ class CharacterBot(discord.Client):
         self.history_objects = {}
         self.history_limits = {}
         self.capacity = asyncio.Semaphore(self.tool_settings['max_parallel'])
+        self.library_settings = library_settings(config)
         if self.tool_settings['enabled']:
-            registry = builtin_registry(self.tool_settings, config.get('memory', {}).get('enabled', False))
+            registry = builtin_registry(self.tool_settings, config.get('memory', {}).get('enabled', False),
+                                        self.library_settings['enabled'])
             self.runtime = Runtime(provider, registry, self.tool_settings)
             store.recover_jobs()
 
     async def setup_hook(self):
         if self.runtime:
             self.cleanup_task = asyncio.create_task(self.cleanup_loop())
-        if self.config.get('memory', {}).get('enabled', False) or self.initiative_channels:
+        if self.config.get('memory', {}).get('enabled', False):
             self.memory_task = asyncio.create_task(self.memory_loop())
+        if self.initiative_channels:
+            self.initiative_task = asyncio.create_task(self.initiative_loop())
 
     async def close(self):
         self.stopping = True
-        pending = [task for task in (self.memory_task, self.cleanup_task, *self.tasks)
+        pending = [task for task in (self.memory_task, self.initiative_task, self.cleanup_task, *self.tasks)
                    if task and task is not asyncio.current_task()]
         for task in pending:
             task.cancel()
@@ -183,8 +190,8 @@ class CharacterBot(discord.Client):
         self.waiting[channel_id] = self.waiting.get(channel_id, 0) + 1
         acquired = False
         try:
-            async with self.locks.setdefault(channel_id, asyncio.Lock()):
-                async with self.capacity:
+            async with self.coordinator.turn(channel_id):
+                async with self.locks.setdefault(channel_id, asyncio.Lock()), self.capacity:
                     self.waiting[channel_id] -= 1
                     acquired = True
                     await self.respond(message, activity_revision=revision)
@@ -284,7 +291,8 @@ class CharacterBot(discord.Client):
                         job = Job(self.store, channel_id, self.user.id if initiative else message.author.id,
                                   message.id, window, self.tool_settings,
                                   attachments=await self.attachments(message, window),
-                                  upload_limit=getattr(message.guild, 'filesize_limit', 8 * 1024 * 1024), initiative=initiative)
+                                  upload_limit=getattr(message.guild, 'filesize_limit', 8 * 1024 * 1024), initiative=initiative,
+                                  library_settings=self.library_settings)
                         self.active[channel_id]['job'] = job
                         result = await self.runtime.run(messages, job)
                         answer = result.answer
@@ -336,6 +344,7 @@ class CharacterBot(discord.Client):
                         if job:
                             self.store.delivery(job.id, len(sent), reply.id)
                         sent.append(normalize(reply))
+                        self.coordinator.spoke(channel_id)
                         from .activity import current
                         event = current.get()
                         if event is not None:
@@ -553,7 +562,12 @@ class CharacterBot(discord.Client):
             lock = self.locks.setdefault(channel_id, asyncio.Lock())
             if lock.locked() or self.waiting.get(channel_id, 0) or self.capacity.locked():
                 continue
-            async with lock, self.capacity:
+            async with self.coordinator.turn(channel_id, initiative=True), lock, self.capacity:
+                row = self.store.attention(channel_id)
+                if row and self.store.clock() < row[2] + interval:
+                    continue
+                if self.waiting.get(channel_id, 0):
+                    continue
                 try:
                     channel = self.get_channel(channel_id) or await self.fetch_channel(channel_id)
                     if isinstance(channel, discord.Thread):
@@ -600,13 +614,19 @@ class CharacterBot(discord.Client):
                             raise
                     finally:
                         self.tasks.discard(task)
+                        self.store.checked_attention(channel_id, revision)
                 except discord.HTTPException:
                     log.warning('Could not check initiative channel %s', channel_id)
+
+    async def initiative_loop(self):
+        await self.wait_until_ready()
+        while not self.is_closed():
+            await self.initiative_tick()
+            await asyncio.sleep(15)
 
     async def memory_loop(self):
         await self.wait_until_ready()
         while not self.is_closed():
-            await self.initiative_tick()
             settings = self.config['memory']
             for channel in self.store.due_memory_channels(settings) if settings.get('enabled', False) else ():
                 if int(channel) not in self.config['allowed_channel_ids']:

@@ -143,8 +143,13 @@ initiative:
 
 These IDs must also be in `allowed_channel_ids`. Onboarding offers a separate
 check-in channel list. Other allowed channels continue to require a ping or reply.
-The timer shares the memory scheduler, but check-ins and memory writing are
-separate jobs; check-ins work with memory disabled.
+Check-ins and memory writing have separate schedulers; check-ins work with
+memory disabled. Each completed check starts the next interval, including silence.
+The scheduler polls every 15 seconds, so the interval is a minimum rather than an
+exact wall-clock deadline. Use the multi-character supervisor described in README
+to serialize channel turns and refresh context after waiting. Waiting for admission
+does not consume pending human activity. Direct invocations take priority over
+waiting check-ins; an already running turn is allowed to finish.
 
 At most once per interval, the bot checks for new eligible human messages, edits
 to encountered messages, or reaction changes. Without new human activity it makes
@@ -302,7 +307,8 @@ There is no host-shell fallback or automatic package installation. A missing or
 blocked backend becomes a tool error; ordinary replies can still finish.
 
 The initial tools are `finish`, `exec`, `read_file`, `write_file`, `get_attachment`,
-`return_file`, `open_job`, and, with memory enabled, `remember` and `forget`. They support ordinary
+`return_file`, `open_job`, the four `library_*` file tools, and, with memory enabled,
+`remember` and `forget`. They support ordinary
 file/media/code work directly; no operation-specific media plugin is required.
 For example, mention the character with an attached photo and ask it to resize it.
 It can download the scoped attachment, run installed tools, inspect the output,

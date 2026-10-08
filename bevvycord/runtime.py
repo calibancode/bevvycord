@@ -26,7 +26,7 @@ class Runtime:
 
     async def _run(self, messages, job):
         scratch = [dict(m) for m in messages]
-        scratch.append({'role': 'user', 'content': '<job>\n' + job.environment() + '\n</job>'})
+        scratch.append({'role': 'user', 'content': '<job>\n' + job.environment() + '\n</job>' + job.library_context()})
         job.recovery_messages = [dict(m) for m in scratch]
         count = 0
         for step in range(self.settings['max_steps']):

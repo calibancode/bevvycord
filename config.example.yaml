@@ -30,6 +30,16 @@ context:
   max_prompt_chars: 200000
 
 storage_dir: data
+# Available with sandbox file tools; explicit saves only, independent of memory.
+library:
+  enabled: true
+  max_bytes: 1073741824 # 1 GiB per character, across all scopes.
+  max_files: 1000
+  file_bytes: 8388608 # Each save/get is also bounded by tools.file_bytes.
+  # Optional library base directory (relative to this config); character ID appended.
+  # storage_dir: ../libraries
+  # Default: data/<character>/library; survives temporary job cleanup.
+
 memory:
   enabled: false
   # Runs only with the bot and only when new experiences/corrections are pending.

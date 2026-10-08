@@ -85,11 +85,27 @@ async def open_job(context, job_id):
     return await context.aopen_job(job_id)
 
 
+async def library_save(context, path, name=None, scope='channel', overwrite=False):
+    return await context.library.save(context, path, name, scope, overwrite)
+
+
+async def library_list(context, prefix='', scope='all', limit=20, offset=0):
+    return context.library.list(context, prefix, scope, limit, offset)
+
+
+async def library_get(context, name, path, scope='channel'):
+    return await context.library.get(context, name, path, scope)
+
+
+async def library_delete(context, name, scope='channel'):
+    return await context.library.delete(context, name, scope)
+
+
 async def finish(context, text=None, reply_to=None, reactions=()):
     return context.finish(text, reply_to, reactions)
 
 
-def builtin_registry(settings, memory_enabled):
+def builtin_registry(settings, memory_enabled, library_enabled=True):
     registry = Registry()
     text = {'type': 'string', 'minLength': 1}
     registry.add('finish', 'Finish this turn. text sends your Discord message and staged files (empty text sends files only); '
@@ -113,8 +129,23 @@ def builtin_registry(settings, memory_enabled):
                      arguments({'attachment_id': text}, ['attachment_id']), get_attachment)
         registry.add('return_file', 'Freeze a workspace file for delivery with your final Discord reply.',
                      arguments({'path': text, 'filename': {**text, 'maxLength': 100}}, ['path']), return_file)
-        registry.add('open_job', 'Copy a surviving previous job workspace into this job, with compact receipts. Same channel and requester only; no action is replayed.',
+        registry.add('open_job', 'Copy a surviving previous job workspace into this job, with compact receipts. Owned by your character, same channel only; the original requester may differ, including self-initiated work. Returns origin metadata; no action is replayed.',
                      arguments({'job_id': {**text, 'pattern': '^[0-9a-f]{32}$'}}, ['job_id']), open_job)
+    if settings['sandbox_enabled'] and library_enabled:
+        filename = {**text, 'maxLength': 160}
+        scope = {'type': 'string', 'enum': ['channel', 'personal']}
+        registry.add('library_save', 'Preserve a workspace file across turns and job expiry. Default scope: current channel; personal is available across your channels. Replacement requires overwrite=true.',
+                     arguments({'path': text, 'name': filename, 'scope': scope,
+                                'overwrite': {'type': 'boolean'}}, ['path']), library_save)
+        registry.add('library_list', 'List your saved filenames, sizes and dates. Includes personal and current-channel files; filter by literal filename prefix. Results are paged, newest first.',
+                     arguments({'prefix': {'type': 'string', 'maxLength': 160},
+                                'scope': {'type': 'string', 'enum': ['all', 'channel', 'personal']},
+                                'limit': {'type': 'integer', 'minimum': 1, 'maximum': 20},
+                                'offset': {'type': 'integer', 'minimum': 0}}), library_list)
+        registry.add('library_get', 'Copy a saved file into a new workspace path for reading or further work. Default scope: current channel. The saved copy is unchanged.',
+                     arguments({'name': filename, 'path': text, 'scope': scope}, ['name', 'path']), library_get)
+        registry.add('library_delete', 'Delete a saved file from your library. Default scope: current channel. Workspace copies are unchanged.',
+                     arguments({'name': filename, 'scope': scope}, ['name']), library_delete)
     if memory_enabled:
         sources = {'type': 'array', 'items': {'type': 'integer', 'minimum': 1}, 'maxItems': 20, 'uniqueItems': True}
         registry.add('remember', 'Save something to your long-term memory, e.g. "Bevvy likes eating shoes". Use when asked to remember '

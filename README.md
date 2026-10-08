@@ -10,13 +10,16 @@ memory, and tools. Built around DeepSeek and inspired by
   to 40 and bridging longer absences with part of the previous conversation.
 - **Optional memory:** characters keep a local `MEMORY.md` per channel, updating
   it after quiet periods or explicit remember/forget requests.
+- **Personal library:** deliberate file saves survive job expiry, with a small
+  recent-file snapshot and personal or channel scope. Separate from conversational memory.
 - **Optional tools:** sandboxed code, attachment processing, returned files,
   and web search/fetch through an included SearXNG plugin.
 - **Optional check-ins:** characters can speak, react, or stay quiet without a
   ping. No new human activity means no check-in model request.
 
-One bot account/process per character; one checkout for all of them. Prompts,
-credentials, conversation history, and memory are separate for each character.
+One bot account per character; one checkout for all of them. A supervisor can run
+multiple characters with shared channel turns. Prompts, credentials, conversation
+history, and memory remain separate for each character.
 
 ## Setup
 
@@ -62,6 +65,38 @@ credentials or network calls:
 
 Memory diffs are shown only when requested. Activity stays in SQLite after job
 files expire; older jobs have unknown origin and token usage.
+
+## Multiple characters
+
+Run characters together to coordinate their conversation turns:
+
+```yaml
+# supervisor.yaml
+pause_seconds: 15
+characters:
+  - config: characters/faust.yaml
+    enabled: true
+  - config: characters/scooter.yaml
+    enabled: true
+```
+
+```bash
+python -m bevvycord --supervisor supervisor.yaml --check-config
+python -m bevvycord --supervisor supervisor.yaml
+```
+
+Use the project's virtual-environment Python. Config paths are relative to the
+manifest. Set `enabled: false` to leave a character out, then restart the supervisor.
+Stop the separate character launchers before switching; existing ownership locks
+prevent duplicate instances from sharing character storage.
+
+Characters take turns per channel, with direct invocations ahead of waiting
+check-ins. After a message, optional check-ins wait `pause_seconds`, then fetch
+fresh context and decide whether to contribute. Each character's next check is
+scheduled from its own completion, so their intervals naturally spread apart.
+Silent checks need no channel pause. Bot messages still cannot wake another bot.
+Different channels remain independent. A failed character stops independently;
+restart the supervisor to retry it. Memory updates use a separate scheduler.
 
 ## Configuration
 

@@ -169,7 +169,13 @@ size/digest/display filename, and adds it to final delivery. Later workspace wri
 do not change that copy. The cap is the smaller of configuration and guild upload
 limit; it does not silently publish oversized files elsewhere.
 
-`open_job` requires the same character/channel/requester and a terminal prior job.
+`open_job` requires the same character and channel and a terminal prior job.
+Jobs belong to the character, so a different requester or a self-initiated
+check-in can resume earlier work. The original initiator, requester (absent for
+self-initiated work), channel, trigger and input message IDs remain recorded and
+are returned with the receipts. Legacy jobs retain their original actor and
+trigger; their initiation mode is unknown and their source list contains only
+the recorded trigger. Attachments and workspaces never cross the channel boundary.
 It validates and copies surviving workspace files into `prior/<job-id>` and returns
 compact outcome receipts. It rejects unsafe file types or excessive storage. This
 is a new model turn, not protocol replay. A receipt with no settled result means
@@ -184,6 +190,64 @@ terminal job directories older than `retention_days` (default 24 hours), at star
 and hourly while running; it preserves active jobs and all conversation/memory data.
 Discord uploads remain available independently of their expired local source files.
 `--jobs` reads states locally without loading keys or contacting services.
+
+## Durable character library
+
+Sandbox file tools also provide `library_save`, `library_list`, `library_get`, and
+`library_delete`, enabled by default when those tools are enabled. A file is durable
+only after an explicit save; saving does not send it to Discord. Ordinary workspaces
+still expire, and `MEMORY.md` still holds conversational recollections.
+
+`library_save(path, name?, scope?, overwrite?)` copies one workspace file. `name`
+defaults to its basename and may contain relative directory components for grouping.
+These are logical names, not host paths. Scope defaults to `channel`: only turns in
+that originating channel can discover, retrieve, replace or delete it. Explicit
+`personal` scope makes a file visible across this character's channels. Use channel
+scope for channel material and attachments unless deliberately making them personal.
+Other characters never share a library. The same name can exist in both scopes;
+retrieval and deletion use the specified scope, without an implicit fallback.
+
+`library_list(prefix?, scope?, limit?, offset?)` returns filenames, scopes, byte sizes,
+and UTC modification dates, newest first. It defaults to personal plus current-channel
+files, with up to 20 entries per page and a `next_offset` for further pages. The optional
+prefix is a literal filename prefix. `library_get(name, path, scope?)` copies a saved
+file into a new workspace path; it never overwrites an existing workspace file. Use
+ordinary `read_file`/`exec` to work with that copy, and save again to preserve edits.
+`library_delete(name, scope?)` removes the saved copy, leaving workspace copies intact.
+Replacing a saved name requires `overwrite: true`; there is no version history.
+
+When accessible saved files exist, the turn's final context message includes at most
+five recent entries and the visible total. No file contents, descriptions or tags are
+injected, and an empty library adds no listing. This snapshot follows the cached
+conversation prefix and is never added to memory or the Discord transcript. Tool
+notes explain persistence once per turn without requesting inspection or saving.
+There is no automatic saving, retrieval or model request dedicated to library upkeep.
+
+The optional `library` config has `enabled` (default true), `max_bytes` (1 GiB),
+`max_files` (1000) and `file_bytes` (8 MiB). Save/get also obey `tools.file_bytes`,
+and retrieval obeys workspace byte and entry limits. These are character-wide quotas
+across all scopes. Full libraries return an error; no saved content is auto-evicted.
+Content normally lives in `data/<character>/library/`. An optional `library.storage_dir`
+is resolved relative to the config and gets the character ID appended; it cannot live
+under temporary jobs. The existing per-character SQLite database stores the index
+and save provenance. Back up both the content directory and that database; changing
+the content directory requires moving the content with it.
+
+Each save records its job, channel, initiator, trigger, and input message IDs. Save/get
+results include compact provenance (up to 20 source IDs plus the full source count);
+the complete source list remains in SQLite. Ordinary tool receipts and activity
+summaries record library operations. Durable files are independent copies: deleting
+source messages or changing conversational memory does not remove them. Use
+`library_delete` for that.
+
+The library is never mounted into the execution sandbox. The host validates regular
+files, rejects symlinks/traversal, serializes operations per character, and completes
+in-progress file and metadata changes before cancellation releases the job. Replacement
+writes a new immutable blob before switching its database record; failed saves retain
+the previous file. Unreferenced blobs from interrupted saves are removed before the
+next save. A missing or unsafe stored file reports an error and can still be deleted;
+no action is silently replayed.
+
 
 ## Memory requests
 

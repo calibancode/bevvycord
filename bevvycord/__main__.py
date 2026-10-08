@@ -37,7 +37,7 @@ async def run(args, cfg):
         store.db.close()
 
 
-async def interruptible_run(args, cfg):
+async def interruptible_run(args, cfg, operation=None):
     # add_signal_handler installs the event-loop wakeup FD, including when
     # idle. Cancel the owner so normal async context/finally cleanup can finish.
     loop, owner = asyncio.get_running_loop(), asyncio.current_task()
@@ -58,7 +58,7 @@ async def interruptible_run(args, cfg):
         except (NotImplementedError, RuntimeError):
             pass  # asyncio.Runner retains its default handler on other platforms.
         try:
-            await run(args, cfg)
+            await (operation if operation is not None else run(args, cfg))
         except asyncio.CancelledError:
             if not interrupted:
                 raise
@@ -74,6 +74,7 @@ def main():
         raise SystemExit('Bevvycord requires Python 3.11 or newer; rebuild the virtual environment with a supported interpreter.')
     parser = argparse.ArgumentParser(description='Channel-aware Discord character bot')
     parser.add_argument('--config', default='config.yaml')
+    parser.add_argument('--supervisor', metavar='MANIFEST', help='Run enabled characters with shared channel turns')
     action = parser.add_mutually_exclusive_group()
     action.add_argument('--check-config', action='store_true', help='Validate without network calls or secrets')
     action.add_argument('--memory-once', type=int, metavar='CHANNEL_ID', help='Rewrite memory from scratch now (makes a provider API call)')
@@ -94,6 +95,19 @@ def main():
             print(invite_url(args.invite))
         except ValueError as exc:
             parser.error(str(exc))
+        return
+    if args.supervisor:
+        if any((args.memory_once, args.jobs, args.activity, args.invite is not None)):
+            parser.error('--supervisor supports only --check-config or normal running')
+        from .supervisor import load_supervisor, run_supervisor
+        configs, pause = load_supervisor(args.supervisor)
+        if args.check_config:
+            print('Supervisor configuration valid. Enabled characters:', ', '.join(c['character']['id'] for c in configs))
+        else:
+            try:
+                asyncio.run(interruptible_run(args, None, run_supervisor(configs, pause)))
+            except KeyboardInterrupt:
+                logging.info('Stopped supervisor.')
         return
     cfg = load_config(args.config)
     if args.invite is not None:

@@ -158,7 +158,14 @@ def test_caps_sources_scoped_continuation_and_retention(tmp_path):
     other = Job(current.store, 200, 7, 3, current.window, current.settings)
     with pytest.raises(ValueError): other.open_job(current.id)
     stranger = Job(current.store, 100, 8, 3, current.window, current.settings)
-    with pytest.raises(ValueError): stranger.open_job(current.id)
+    assert stranger.open_job(current.id)['initiator_id'] == '7'
+    autonomous = Job(current.store, 100, 9, 3, current.window, current.settings, initiative=True)
+    assert autonomous.open_job(current.id)['requester_id'] == '7'
+    assert autonomous.open_job(current.id)['character_id'] == current.store.root.name
+    foreign_store = Store(tmp_path / 'foreign', 'another')
+    foreign = Job(foreign_store, 100, 7, 3, current.window, current.settings)
+    with pytest.raises(ValueError, match='character and channel'): foreign.open_job(current.id)
+    foreign_store.db.close()
     current.store.clock = lambda: 10**12
     clean_jobs(current.store, current.settings)
     assert not current.work.exists()

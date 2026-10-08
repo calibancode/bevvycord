@@ -5,9 +5,10 @@ import os
 import shlex
 
 
-def load_env_file(path):
+def read_env_file(path):
+    values = {}
     if not path:
-        return
+        return values
     for number, line in enumerate(Path(path).read_text().splitlines(), 1):
         line = line.strip()
         if not line or line.startswith('#'):
@@ -22,7 +23,13 @@ def load_env_file(path):
         if len(parsed) != 1:
             raise ValueError(f'Invalid local environment value at line {number}')
         # Explicit process environment overrides the configured local file.
-        os.environ.setdefault(key, parsed[0])
+        values[key] = parsed[0]
+    return values
+
+
+def load_env_file(path):
+    for key, value in read_env_file(path).items():
+        os.environ.setdefault(key, value)
 
 
 @contextmanager

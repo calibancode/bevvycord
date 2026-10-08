@@ -7,9 +7,9 @@ log = logging.getLogger(__name__)
 
 
 class Provider:
-    def __init__(self, config):
+    def __init__(self, config, environment=None):
         self.config = config
-        key = os.environ.get(config.get('api_key_env', 'DEEPSEEK_API_KEY'))
+        key = (os.environ if environment is None else environment).get(config.get('api_key_env', 'DEEPSEEK_API_KEY'))
         if not key:
             raise ValueError('Provider API-key environment variable is unset')
         self.client = httpx.AsyncClient(

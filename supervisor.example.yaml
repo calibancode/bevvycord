@@ -1,0 +1,7 @@
+# Paths are relative to this manifest. Use your existing character configs.
+pause_seconds: 15
+characters:
+  - config: characters/faust.yaml
+    enabled: true
+  - config: characters/scooter.yaml
+    enabled: true

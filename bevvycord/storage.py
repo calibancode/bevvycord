@@ -56,6 +56,13 @@ class Store:
               changed REAL NOT NULL, PRIMARY KEY(channel,message_id));
             CREATE TABLE IF NOT EXISTS attention_messages (
               channel TEXT NOT NULL, id INTEGER NOT NULL, PRIMARY KEY(channel,id));
+            CREATE TABLE IF NOT EXISTS library_files (
+              scope TEXT NOT NULL, name TEXT NOT NULL, blob TEXT NOT NULL,
+              bytes INTEGER NOT NULL, modified REAL NOT NULL,
+              job TEXT NOT NULL, channel TEXT NOT NULL, actor TEXT NOT NULL,
+              trigger_id INTEGER NOT NULL, source_message_ids TEXT NOT NULL,
+              PRIMARY KEY(scope,name));
+            CREATE INDEX IF NOT EXISTS library_recent ON library_files(modified DESC);
             CREATE TABLE IF NOT EXISTS activity (
               id TEXT PRIMARY KEY, job TEXT, kind TEXT NOT NULL, channel TEXT NOT NULL,
               started REAL NOT NULL, ended REAL, state TEXT NOT NULL,
@@ -79,6 +86,13 @@ class Store:
                 if key not in columns:
                     default = 'message' if key == 'kind' else ''
                     self.db.execute(f"ALTER TABLE deliveries ADD COLUMN {key} TEXT NOT NULL DEFAULT '{default}'")
+            columns = {row[1] for row in self.db.execute('PRAGMA table_info(jobs)')}
+            if 'source_message_ids' not in columns:
+                self.db.execute("ALTER TABLE jobs ADD COLUMN source_message_ids TEXT NOT NULL DEFAULT '[]'")
+                self.db.execute("UPDATE jobs SET source_message_ids='[' || trigger_id || ']'")
+            if 'initiative' not in columns:
+                # Old records do not reliably distinguish human and self initiation.
+                self.db.execute('ALTER TABLE jobs ADD COLUMN initiative INTEGER')
             # Former remember requests carried transcript copies; keep only the note.
             if self.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='memory_requests'").fetchone():
                 self.db.execute("INSERT OR IGNORE INTO memory_notes(channel,kind,actor,created,note,message_ids,job,call_id) "
@@ -287,10 +301,11 @@ class Store:
             self.db.execute("UPDATE activity SET state='interrupted',ended=? WHERE state IN ('running','delivering')", (self.clock(),))
             self.db.execute("UPDATE jobs SET state='interrupted',updated=? WHERE state IN ('running','delivering')", (self.clock(),))
 
-    def create_job(self, job_id, channel, actor, trigger_id):
+    def create_job(self, job_id, channel, actor, trigger_id, source_message_ids=None, initiative=None):
         with self.db:
-            self.db.execute("INSERT INTO jobs(id,channel,actor,trigger_id,state,created,updated) VALUES (?,?,?,?,'running',?,?)",
-                            (job_id, str(channel), str(actor), trigger_id, self.clock(), self.clock()))
+            self.db.execute("INSERT INTO jobs(id,channel,actor,trigger_id,state,created,updated,source_message_ids,initiative) VALUES (?,?,?,?,'running',?,?,?,?)",
+                            (job_id, str(channel), str(actor), trigger_id, self.clock(), self.clock(),
+                             json.dumps(sorted(set(source_message_ids or [trigger_id]))), initiative))
 
     def job_state(self, job_id, state, detail=''):
         with self.db:

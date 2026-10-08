@@ -13,6 +13,14 @@ TOOL_DEFAULTS = {
     'max_artifacts': 5, 'max_parallel': 2, 'max_queue': 3, 'retention_days': 1,
 }
 
+LIBRARY_DEFAULTS = {'enabled': True, 'max_bytes': 1024 ** 3, 'max_files': 1000,
+                    'file_bytes': 8 * 1024 * 1024}
+
+
+def library_settings(config):
+    return {**LIBRARY_DEFAULTS, **config.get('library', {})}
+
+
 MEMORY_KEYS = {'enabled', 'quiet_minutes', 'cooldown_hours', 'max_wait_hours', 'retry_minutes',
                'model', 'parameters', 'max_archive_chars'}
 
@@ -29,7 +37,7 @@ def load_config(path):
     for section in ('character', 'provider'):
         if not isinstance(cfg.get(section), dict):
             raise ValueError(f'{section} must be a mapping')
-    for section in ('context', 'memory', 'tools', 'initiative'):
+    for section in ('context', 'memory', 'tools', 'initiative', 'library'):
         if not isinstance(cfg.setdefault(section, {}), dict):
             raise ValueError(f'{section} must be a mapping')
     if 'application_id' in cfg:
@@ -37,7 +45,7 @@ def load_config(path):
     # YAML strings such as "false" are truthy in Python: never accidentally
     # enable DM access or paid memory jobs from a quoted boolean.
     for section, key in ((cfg, 'allow_dms'), (cfg['memory'], 'enabled'),
-                         (cfg['tools'], 'enabled'), (cfg['tools'], 'sandbox_enabled'), (cfg['initiative'], 'enabled')):
+                         (cfg['library'], 'enabled'), (cfg['tools'], 'enabled'), (cfg['tools'], 'sandbox_enabled'), (cfg['initiative'], 'enabled')):
         if key in section and not isinstance(section[key], bool):
             raise ValueError(f'{key} must be a YAML boolean (true or false, without quotes)')
     character = cfg['character']
@@ -77,6 +85,14 @@ def load_config(path):
         raise ValueError('initiative channels must also be allowed channels')
     if initiative['enabled'] and (not cfg['tools'].get('enabled', False) or not channels):
         raise ValueError('Initiative requires enabled tools and explicit channel_ids')
+    library = library_settings(cfg)
+    if set(cfg['library']) - (LIBRARY_DEFAULTS.keys() | {'storage_dir'}):
+        raise ValueError('Unknown library configuration option')
+    for key in ('max_bytes', 'max_files', 'file_bytes'):
+        if type(library[key]) is not int or library[key] < 1:
+            raise ValueError(f'library.{key} must be a positive integer')
+    if 'storage_dir' in library and (not isinstance(library['storage_dir'], str) or not library['storage_dir']):
+        raise ValueError('library.storage_dir must be a nonempty path')
     provider = cfg['provider']
     if not provider.get('base_url', '').startswith(('https://', 'http://')) or not provider.get('model'):
         raise ValueError('provider.base_url and provider.model are required')
@@ -110,4 +126,6 @@ def load_config(path):
     for key in ('env_file', 'shared_env_file'):
         if cfg.get(key):
             cfg[key] = str((path.parent / cfg[key]).resolve())
+    if cfg['library'].get('storage_dir'):
+        cfg['library']['storage_dir'] = str((path.parent / cfg['library']['storage_dir']).resolve())
     return cfg
