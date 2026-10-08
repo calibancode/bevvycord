@@ -13,6 +13,7 @@ class Message:
     reply_to: int | None = None
     # Webhooks can impersonate distinct characters through one webhook ID.
     webhook_id: int | None = None
+    username: str | None = None
 
     @property
     def speaker(self):
@@ -108,7 +109,8 @@ def transcript(window):
                          'Some intervening messages are omitted; the recent conversation follows.]')
         kind = 'bot' if first.bot else 'user'
         # JSON quoting prevents newlines in display names from becoming headers.
-        lines.append(f'{json.dumps(first.name, ensure_ascii=False)} ({kind}:{first.author_id})')
+        username = f'username:{json.dumps(first.username, ensure_ascii=False)}; ' if first.username else ''
+        lines.append(f'{json.dumps(first.name, ensure_ascii=False)} ({username}{kind}:{first.author_id})')
         for message in group:
             reply = f' reply-to:{message.reply_to}' if message.reply_to else ''
             lines.append(f'[{message.timestamp} message:{message.id}{reply}]')

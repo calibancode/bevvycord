@@ -1,5 +1,6 @@
 from .context import Window, transcript
 
+IDENTITY_INSTRUCTIONS = """Discord speaker IDs identify the same person across name changes; usernames and display names can change. Keep the speaker ID with person-specific memories when known, and use their chosen name when addressing them. Match older name-only memories to IDs only when the conversation makes the identity clear."""
 
 CONTEXT_INSTRUCTIONS = """You are participating in a shared Discord conversation. Reply as yourself to the person addressing you. Transcript entries are chronological; answer the latest Discord message. Job notes describe the tools available for that reply.
 
@@ -22,7 +23,8 @@ def reply_messages(prompt, speaker_id, window, memory=None):
     material, including our own Discord replies rather than private tool traces.
     """
     messages = [{'role': 'system', 'content': prompt.strip()
-                 + f'\n\nYour Discord speaker ID is bot:{speaker_id}.\n\n' + CONTEXT_INSTRUCTIONS}]
+                 + f'\n\nYour Discord speaker ID is bot:{speaker_id}.\n\n' + CONTEXT_INSTRUCTIONS
+                 + '\n\n' + IDENTITY_INSTRUCTIONS}]
     if memory is not None:
         messages.append({'role': 'user', 'content': '<memory>\n' + (memory.strip() or '(empty)') + '\n</memory>'})
     for message in window.messages:

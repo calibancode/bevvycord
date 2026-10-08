@@ -46,6 +46,7 @@ def normalize(message):
         text='\n'.join(dict.fromkeys(parts)),
         bot=message.author.bot or bool(message.webhook_id),
         reply_to=getattr(message.reference, 'message_id', None), webhook_id=message.webhook_id,
+        username=None if message.webhook_id else getattr(message.author, 'name', None),
     )
 
 

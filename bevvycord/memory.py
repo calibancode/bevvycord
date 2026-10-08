@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 import json
 
-from .prompts import MEMORY_EDIT_INSTRUCTIONS, MEMORY_INSTRUCTIONS
+from .prompts import IDENTITY_INSTRUCTIONS, MEMORY_EDIT_INSTRUCTIONS, MEMORY_INSTRUCTIONS
 
 EDIT_STEPS = 12
 
@@ -9,7 +9,7 @@ EDIT_STEPS = 12
 def _system(store, config, channel, instructions):
     identity = store.speaker_id(channel)
     identity_note = f'\n\nYour Discord speaker ID is bot:{identity}.' if identity else ''
-    return config['character']['prompt'].strip() + identity_note + '\n\n' + instructions
+    return config['character']['prompt'].strip() + identity_note + '\n\n' + instructions + '\n\n' + IDENTITY_INSTRUCTIONS
 
 
 def _model(config):

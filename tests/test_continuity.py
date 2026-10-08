@@ -212,6 +212,22 @@ def test_gateway_and_rest_copies_normalize_to_the_same_speaker_name():
     rest = NS(**common, author=NS(id=2, display_name='Bevvy', global_name='Bevvy', name='bevvy', bot=False))
     assert normalize(gateway) == normalize(rest)
     assert normalize(gateway).name == 'Bevvy'
+    assert normalize(gateway).username == 'bevvy'
+
+
+def test_transcript_identity_survives_name_changes_and_old_windows():
+    from dataclasses import replace
+    from bevvycord.context import transcript
+    original = replace(msg(1), name='Bevvy', username='bevvy')
+    renamed = replace(original, id=2, name='New Name', username='new_username')
+    assert original.speaker == renamed.speaker
+    assert 'username:"bevvy"; user:' in transcript(Window([original]))
+    old = Window([replace(original, username=None)]).dumps()
+    assert Window.loads(old).messages[0].username is None
+    import json
+    legacy = json.loads(old)
+    del legacy['messages'][0]['username']
+    assert Window.loads(json.dumps(legacy)).messages[0].username is None
 
 
 def test_threads_never_trigger_even_when_listed():
