@@ -1,0 +1,69 @@
+# Copy to config.yaml. Set secrets in the environment; do not put them here.
+bot_token_env: DISCORD_BOT_TOKEN
+# Optional public Discord Application ID for offline --invite. Startup discovers it.
+# application_id: 123456789012345678
+character:
+  # Stable local namespace; changing this starts separate history and memory.
+  id: rowan
+  prompt: |
+    You are Rowan, a friendly character participating in this Discord server.
+    Speak naturally and concisely. Develop your own character description here.
+
+# Explicitly list your normal channel AND testing channel. Empty means no access.
+allowed_channel_ids: []
+allowed_user_ids: [] # Empty means any human in an allowed channel.
+allow_dms: false
+
+provider:
+  base_url: https://api.deepseek.com
+  api_key_env: DEEPSEEK_API_KEY
+  model: deepseek-flash # Or deepseek-v4-pro.
+  timeout_seconds: 180
+  parameters:
+    max_tokens: 4096
+
+context:
+  soft_chunks: 20
+  hard_chunks: 40
+  # Fetch/character safety bounds, separate from the character's instructions.
+  max_fetch_messages: 1000
+  max_prompt_chars: 200000
+
+storage_dir: data
+memory:
+  enabled: false
+  # Runs only with the bot and only when new experiences/corrections are pending.
+  quiet_minutes: 30
+  cooldown_hours: 4
+  max_wait_hours: 24
+  retry_minutes: 30
+  model: deepseek-flash
+  parameters:
+    max_tokens: 4096
+  # If the archive exceeds this bound, skip and report it; never silently discard it.
+  max_archive_chars: 800000
+
+# Optional tool turns; existing character configurations stay text-only.
+initiative:
+  enabled: false
+  interval_minutes: 30
+  channel_ids: [] # Explicit subset of allowed_channel_ids; leave testing channels out.
+
+tools:
+  enabled: false
+  sandbox_enabled: true # Linux bubblewrap + util-linux; never a host shell fallback.
+  plugins: [] # Explicit trusted Python modules exposing register(registry).
+  max_steps: 12 # Model requests including one reserved final reply; 11 working requests.
+  max_calls: 24
+  turn_seconds: 600
+  exec_seconds: 60
+  memory_mb: 1024
+  file_bytes: 8388608 # Also bounded by the server's upload limit.
+  workspace_bytes: 268435456
+  workspace_files: 2000
+  output_chars: 12000
+  max_working_chars: 300000
+  max_artifacts: 5
+  max_parallel: 2
+  max_queue: 3 # Waiting invocations per channel.
+  retention_days: 1 # Terminal job files expire after 24 hours; active jobs are preserved.
