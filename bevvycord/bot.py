@@ -284,6 +284,8 @@ class CharacterBot(discord.Client):
                         result = await self.runtime.run(messages, job)
                         answer = result.answer
                     else:
+                        messages.append({'role': 'user', 'content':
+                                         'Someone is addressing you. Respond to their latest message.'})
                         answer = await self.provider.generate(messages)
                     current_trigger = await message.channel.fetch_message(message.id)
                     if initiative and activity_revision is not None and self.store.attention(channel_id)[0] > activity_revision:
