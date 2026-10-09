@@ -24,9 +24,12 @@ def request_fingerprints(messages, tools=None, tool_choice=None):
             section = next((name for name in ('conversation', 'memory', 'reactions', 'job', 'deferred_checkin')
                             if content.startswith('<' + name + '>')), 'context')
         sections.setdefault(section, []).append(message)
-    result = {'sections': {name: {'hash': fingerprint(group), 'messages': len(group)}
+    result = {'sections': {name: {'hash': fingerprint(group), 'messages': len(group),
+                                  'content_chars': sum(len(m['content']) for m in group
+                                                       if isinstance(m.get('content'), str))}
                            for name, group in sections.items()},
               'tools': fingerprint({'tools': tools or [], 'tool_choice': tool_choice})}
+    result['message_hashes'] = [fingerprint(message) for message in messages]
     conversation = sections.get('conversation')
     if conversation:
         result['conversation_head'] = fingerprint(conversation[0])

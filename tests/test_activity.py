@@ -174,6 +174,11 @@ def test_request_fingerprints_track_memory_without_recording_content(tmp_path, m
     assert a['sections']['conversation'] == b['sections']['conversation']
     assert a['conversation_head'] == b['conversation_head']
     assert a['sections']['memory'] != b['sections']['memory']
+    assert a['sections']['memory']['content_chars'] == len('<memory>\nPRIVATE OLD MEMORY\n</memory>')
+    assert len(a['message_hashes']) == 3
+    assert a['message_hashes'][0] == b['message_hashes'][0]
+    assert a['message_hashes'][1] != b['message_hashes'][1]
+    assert a['message_hashes'][2] == b['message_hashes'][2]
     assert a['tools'] == b['tools'] != third['fingerprints']['tools']
     report = '\n'.join(inspect_activity(store.root / 'history.sqlite3', {100}, current_job.id))
     assert 'request 1: model=reply-model' in report and 'fingerprints:' in report

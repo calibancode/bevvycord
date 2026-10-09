@@ -16,10 +16,13 @@ Discord message occupy separate API messages. Unchanged history entries remain
 identical message prefixes across invocations, including when a speaker's chunk
 grows. The 20/40 window limits still count speaker chunks, not API messages.
 Message edits/deletions and window resets legitimately change these prefixes. Private tool messages are never replayed into later Discord turns. Current memory
-follows the transcript so updating it does not invalidate the conversation prefix.
+precedes the transcript so unchanged memory remains cacheable as chat grows or resets.
+A memory update intentionally invalidates the following conversation prefix. Fixed
+tool guidance and budgets join the system instructions; job-specific details stay last.
 
 Successful requests record the requested model, the served model/backend identifier
-when returned, and content-free hashes/counts for prompt sections and tool definitions
+when returned, and content-free hashes/counts and content character lengths for prompt sections,
+ordered per-message hashes, and hashes of tool definitions
 in the existing activity usage JSON. The conversation's first-message hash distinguishes
 window resets from growth. These hashes are local diagnostics, not DeepSeek cache keys.
 `--activity --job FULL_JOB_ID` shows per-request usage and fingerprints; old records

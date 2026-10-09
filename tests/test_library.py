@@ -45,7 +45,9 @@ def test_save_expiry_restart_and_passive_reuse_without_reminder(tmp_path):
                           response(call('read_file', {'path': 'draft.txt'}, 'read')),
                           response(call('finish', {}, 'done')))
         await Runtime(second, registry, next_job.settings).run(messages, next_job)
-        assert second.requests[0][:-1] == messages
+        assert second.requests[0][:-1] == provider.requests[0][:-1]
+        assert second.requests[0][1:-1] == messages[1:]
+        assert 'Tools work privately' not in messages[0]['content']
         context = second.requests[0][-1]['content']
         assert '<library_files>' in context and 'poems/draft.txt' in context
         assert 'My unfinished poem' not in context  # Metadata only.

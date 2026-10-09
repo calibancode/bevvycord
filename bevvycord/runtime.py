@@ -26,6 +26,11 @@ class Runtime:
 
     async def _run(self, messages, job):
         scratch = [dict(m) for m in messages]
+        guidance = job.instructions()
+        if scratch and scratch[0]['role'] == 'system':
+            scratch[0]['content'] += '\n\n' + guidance
+        else:
+            scratch.insert(0, {'role': 'system', 'content': guidance})
         scratch.append({'role': 'user', 'content': '<job>\n' + job.environment() + '\n</job>' + job.library_context()})
         job.recovery_messages = [dict(m) for m in scratch]
         count = 0

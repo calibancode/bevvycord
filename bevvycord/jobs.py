@@ -66,8 +66,8 @@ class Job:
             event['job'] = self.id
             store.save_activity(event)
 
-    def environment(self):
-        inventory = '\n'.join(f'{a.id}: {a.filename!r} ({a.size} bytes)' for a in self.attachments.values()) or '(none)'
+    def instructions(self):
+        """Stable guidance shared by every job with the same configuration."""
         return ('Tools work privately during this turn. You may use multiple tools before finishing. '
                 'Only messages, files and reactions you choose to send go to Discord. '
                 '`finish` ends your turn; call it without arguments to leave no message or reaction. '
@@ -76,11 +76,14 @@ class Job:
                 'return_file stages a file for your final reply. Shell execution has no network.\n'
                 f'Tool budget: {self.settings["max_steps"] - 1} working model requests, '
                 f'{self.settings["max_calls"]} tool calls; stage files before your final reply.\n'
-                f'Job ID: {self.id}\n'
                 + ('Workspace files expire; library_save preserves files worth keeping for later turns. '
                    'Library scope defaults to this channel; personal is visible across your channels. '
                    'Use library_list/get/delete to find, retrieve or remove saved files. '
-                   'MEMORY.md remains conversational recollection, separate from saved files.\n' if self.library else '')
+                   'MEMORY.md remains conversational recollection, separate from saved files.\n' if self.library else ''))
+
+    def environment(self):
+        inventory = '\n'.join(f'{a.id}: {a.filename!r} ({a.size} bytes)' for a in self.attachments.values()) or '(none)'
+        return (f'Job ID: {self.id}\n'
                 + f'Attachments available in this conversation:\n{inventory}'
                 + ('\nNew activity happened in the channel. Nobody has summoned you. '
                    'You may participate in conversation, pursue your own interests, use tools privately, '

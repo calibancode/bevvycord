@@ -19,23 +19,23 @@ def test_transcript_prefix_survives_growth_of_same_speaker_chunk():
     growing = Window(old.messages + [entry(3), entry(4, 9), entry(5)])
     first = reply_messages('Rowan', 9, old, '- A memory')
     second = reply_messages('Rowan', 9, growing, '- A memory')
-    assert second[:len(first) - 1] == first[:-1]
+    assert second[:len(first)] == first
     assert len(chunks(old.messages)) == 1
     assert len(chunks(growing.messages)) == 3
     assert all(m['role'] == 'user' for m in second[1:])
-    assert '(bot:9)' in second[-3]['content']
-    assert second[-2]['content'].count('message 5') == 1
+    assert '(bot:9)' in second[-2]['content']
+    assert second[-1]['content'].count('message 5') == 1
 
 
 def test_memory_and_gap_are_separate_source_messages():
     window = Window([entry(1), entry(10), entry(11)], gap_before=10)
     first = reply_messages('Rowan', 9, window, '- old')
     second = reply_messages('Rowan', 9, window, '- new')
-    assert first[:-1] == second[:-1]
-    assert first[-1] != second[-1]
-    assert first[2]['content'].startswith('[Context note:')
+    assert first[:1] == second[:1] and first[2:] == second[2:]
+    assert first[1] != second[1]
+    assert first[3]['content'].startswith('[Context note:')
     assert sum('[Context note:' in m['content'] for m in first) == 1
-    assert '(empty)' in reply_messages('Rowan', 9, window, '')[-1]['content']
+    assert '(empty)' in reply_messages('Rowan', 9, window, '')[1]['content']
     assert reply_messages('Rowan', 9, window)[1]['content'].startswith('<conversation>')
 
 
@@ -47,6 +47,10 @@ def test_edit_and_window_reset_invalidate_only_the_expected_prefix():
     reset = reply_messages('Rowan', 9, Window([entry(10), entry(11)]))
     assert old[0] == reset[0]
     assert old[1] != reset[1]
+    remembered = reply_messages('Rowan', 9, Window([entry(1)]), '- Fixed memory')
+    reset_memory = reply_messages('Rowan', 9, Window([entry(10)]), '- Fixed memory')
+    assert remembered[:2] == reset_memory[:2]
+    assert remembered[2] != reset_memory[2]
 
 
 def test_actual_bot_requests_keep_history_prefix_and_isolate_job_details(tmp_path):
@@ -68,11 +72,13 @@ def test_actual_bot_requests_keep_history_prefix_and_isolate_job_details(tmp_pat
             assert first[-1]['content'].startswith('<job>')
             assert second[-1]['content'].startswith('<job>')
             assert first[-1] != second[-1]
-            assert second[:len(first) - 2] == first[:-2]
-            assert second[-2] == first[-2]  # Memory stays current, after new chat.
+            assert second[:len(first) - 1] == first[:-1]
+            assert second[1] == first[1]  # Memory is included in the reusable prefix.
+            assert 'Tool budget:' in first[0]['content']
+            assert 'Tools work privately' not in first[-1]['content']
             assert 'Job ID:' not in str(first[:-1])
-            assert second[-3]['content'].count('<@9> second') == 1
-            assert '(bot:9)' in second[-4]['content']
+            assert second[-2]['content'].count('<@9> second') == 1
+            assert '(bot:9)' in second[-3]['content']
             archive, _, _ = store.archive(100)
             assert '<job>' not in archive
         finally:
