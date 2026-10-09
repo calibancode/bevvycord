@@ -24,6 +24,13 @@ from .recovery import recover, TurnError, explanation
 log = logging.getLogger(__name__)
 
 
+def memory_control_target(message):
+    # Recognize controls for every character so one bot's command cannot wake
+    # another character or enter its conversational history.
+    match = re.fullmatch(r'\s*<@!?(\d+)>\s+memory rebuild\s*', message.content, re.IGNORECASE)
+    return int(match[1]) if match else None
+
+
 class CharacterBot(discord.Client):
     def __init__(self, config, store, provider, coordinator=None, environment=None):
         intents = discord.Intents.default()
@@ -95,6 +102,8 @@ class CharacterBot(discord.Client):
             if fetched > settings['max_fetch_messages']:
                 self.history_limits[trigger.channel.id] = True
                 break
+            if memory_control_target(message) is not None:
+                continue
             if message.type not in (discord.MessageType.default, discord.MessageType.reply):
                 continue
             item = normalize(message)
@@ -137,7 +146,7 @@ class CharacterBot(discord.Client):
 
     def message_activity(self, message):
         text = re.sub(rf'<@!?{self.user.id}>', '', message.content).strip().lower()
-        return (text not in ('status', 'cancel')
+        return (memory_control_target(message) is None and text not in ('status', 'cancel')
                 and self.human_activity(message.channel.id, message.author, message.webhook_id, message.channel))
 
     async def refresh_reactions(self, channel, window):
@@ -156,6 +165,15 @@ class CharacterBot(discord.Client):
 
     async def on_message(self, message):
         cfg = self.config
+        target = memory_control_target(message)
+        if target is not None:
+            if (target == self.user.id
+                    and cfg.get('memory', {}).get('enabled', False)
+                    and is_trigger(message, self.user.id, cfg['allowed_channel_ids'],
+                                   cfg['allowed_user_ids'], cfg.get('allow_dms', False))):
+                self.store.request_memory_rebuild(message.channel.id)
+                log.info('Memory rebuild queued for channel %s', message.channel.id)
+            return
         revision = None
         if message.channel.id in self.initiative_channels and not isinstance(message.channel, discord.Thread):
             if self.store.attention(message.channel.id) is None:
@@ -620,7 +638,8 @@ class CharacterBot(discord.Client):
                     return None
                 latest = None
                 async for source in channel.history(limit=self.config['context']['max_fetch_messages']):
-                    if source.type in (discord.MessageType.default, discord.MessageType.reply):
+                    if (source.type in (discord.MessageType.default, discord.MessageType.reply)
+                            and memory_control_target(source) is None):
                         latest = source
                         break
                 if not latest:
@@ -641,7 +660,9 @@ class CharacterBot(discord.Client):
                         self.store.note_activity(channel_id, source.id,
                             source.type in (discord.MessageType.default, discord.MessageType.reply)
                             and self.message_activity(source))
-                    readable = [source for source in observed if source.type in (discord.MessageType.default, discord.MessageType.reply)]
+                    readable = [source for source in observed
+                                if source.type in (discord.MessageType.default, discord.MessageType.reply)
+                                and memory_control_target(source) is None]
                     if readable:
                         latest = max([latest, *readable], key=lambda source: source.id)
                     self.store.scanned_attention(channel_id, max([latest.id, *(source.id for source in observed)]))

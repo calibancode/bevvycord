@@ -241,18 +241,37 @@ participation or an archived edit/deletion makes that channel's memory pending.
 The scheduler checks once a minute, only while the bot is running, and only for
 allowed channels. Pending age, activity, last successful writing time and failure
 retry time persist across restarts. Overdue pending work is checked after connecting;
-idle channels with no new material are never rewritten. No separate service starts.
+Idle channels are rewritten only for an explicit rebuild or a memory-writer revision migration. No separate service starts.
 Existing archives acquire timing state automatically; the former `daily_hour_utc`
 setting is no longer used (the config loader rejects it). The manual refresh
 command bypasses quiet/cooldown waits and records a new successful writing time.
 Choose a writer model and its supported parameters separately under `memory`.
 
-Scheduled updates **edit** the existing MEMORY.md. The writer receives the current
-file plus what changed since the last update: new conversation, current versions
-of edited earlier messages, deleted messages (to retract what depended on them),
-and pending `remember`/`forget` requests. It edits with exact-match `replace` and
-`append` tools, so lines it doesn't touch can't be lost. A channel without a
-MEMORY.md gets a full first write instead.
+Scheduled updates rewrite the complete MEMORY.md in one writer call. The writer
+receives the current file plus what changed since the last update: new
+conversation, current versions of edited earlier messages, deleted messages (to
+retract what depended on them), and pending `remember`/`forget` requests. It can
+consolidate and reorganize the whole document while retaining meaningful older
+recollections. A channel without a MEMORY.md gets a full first write instead.
+
+Existing memories get one full rebuild after a memory-writer revision changes,
+including this migration from patch edits. This is queued on startup, bypasses
+quiet/cooldown, and retains failure backoff. A successful write records the new
+revision so subsequent restarts do not repeat it.
+
+To request a full rebuild while a bot is running, send exactly:
+
+```text
+@Bot memory rebuild
+```
+
+Use a real Discord mention of the character. The command follows the configured
+channel/user authorization and requires memory to be enabled. It silently queues
+a rebuild, without a conversational turn, public reply, or check-in wakeup. All
+characters exclude this command from later conversational history. Repeated
+requests coalesce. The memory loop runs it after the character's current channel
+work settles, retaining failure backoff. Check logs or `--activity --memory-diffs`
+for completion.
 
 A **full refresh** (`--memory-once`) rewrites MEMORY.md from scratch using the
 current file, the whole deduplicated participation archive (messages the character

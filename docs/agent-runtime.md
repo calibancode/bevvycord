@@ -266,8 +266,8 @@ triggering message). Source IDs must occur in the selected window. No transcript
 copy is stored; sources are read from the archive, so edits and deletions apply.
 A remember note whose sources are all deleted is withdrawn.
 
-Scheduled updates show pending notes to the writer, which edits MEMORY.md with
-`replace`/`append` tools; applied notes are marked and not shown again. A full
+Scheduled updates show pending notes to the writer, which returns the complete
+revised MEMORY.md in one call; applied notes are marked and not shown again. A full
 refresh (`--memory-once`) rewrites from the current MEMORY.md and the archive and
 lists every standing note in date order, so forget notes keep suppressing facts
 the archive still contains. Writer instructions say never to record that something

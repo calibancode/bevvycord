@@ -1,4 +1,3 @@
-import json
 """A full offline conversation lifecycle through the actual bot event handler."""
 import asyncio
 from datetime import datetime, timezone
@@ -61,6 +60,9 @@ def test_full_conversation_loop_with_memory_restart_and_absence(tmp_path, monkey
             self.requests, self.inject, self.fail = [], None, False
         async def generate(self, messages, **kwargs):
             self.requests.append(messages)
+            if '<new_conversation>' in messages[1]['content']:
+                assert '<current_memory>\n- OLD LINE\n</current_memory>' in messages[1]['content']
+                return '- I remember this channel.'
             if '<participation_archive>' in messages[1]['content']:
                 # A channel without MEMORY.md gets a full first write.
                 assert '<current_memory>\n(empty)\n</current_memory>' in messages[1]['content']
@@ -73,18 +75,6 @@ def test_full_conversation_loop_with_memory_restart_and_absence(tmp_path, monkey
                 self.fail = False
                 raise RuntimeError('Simulated provider failure')
             return 'My character reply.'
-        async def complete(self, messages, tools=None, **kwargs):
-            # Scheduled memory updates edit the existing file through tools.
-            self.requests.append(messages)
-            assert [t['function']['name'] for t in tools] == ['replace', 'append']
-            assert '<current_memory>\n- OLD LINE\n</current_memory>' in messages[1]['content']
-            assert '<new_conversation>' in messages[1]['content']
-            if messages[-1]['role'] == 'tool':
-                assert json.loads(messages[-1]['content']) == {'status': 'replaced'}
-                return {'finish_reason': 'stop', 'message': {'role': 'assistant', 'content': 'Updated.'}}
-            edit = {'old': '- OLD LINE', 'new': '- I remember our ongoing conversation.'}
-            return {'finish_reason': 'tool_calls', 'message': {'role': 'assistant', 'content': None, 'tool_calls': [
-                {'id': 'e1', 'type': 'function', 'function': {'name': 'replace', 'arguments': json.dumps(edit)}}]}}
 
     async def scenario():
         cfg = {'character': {'prompt': 'You are Rowan'}, 'provider': {'model': 'fake'},
@@ -124,8 +114,9 @@ def test_full_conversation_loop_with_memory_restart_and_absence(tmp_path, monkey
             assert len(provider.requests) == calls
 
             # Exercise the actual quiet-period loop without a real-time wait.
-            store.memory_path(100).write_text('- OLD LINE\n')
-            future = store.clock() + 1801
+            store.write_memory(100, '- OLD LINE\n', 0)
+            store._mark_pending(100)
+            future = store.clock() + 4 * 3600 + 1
             store.clock = lambda: future
             sleeps = []
             async def fake_sleep(delay):

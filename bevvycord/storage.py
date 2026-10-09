@@ -9,6 +9,9 @@ from datetime import datetime, timezone
 from .context import Message, Window, transcript
 
 
+MEMORY_REVISION = 1
+
+
 class Store:
     def __init__(self, root, character, clock=None, retain_deleted=True):
         self.clock = clock or time.time
@@ -47,6 +50,7 @@ class Store:
               message_ids TEXT NOT NULL, applied INTEGER NOT NULL DEFAULT 0,
               job TEXT, call_id TEXT, UNIQUE(job,call_id));
             CREATE TABLE IF NOT EXISTS memory_forced (channel TEXT PRIMARY KEY);
+            CREATE TABLE IF NOT EXISTS memory_rebuilds (channel TEXT PRIMARY KEY, requested REAL NOT NULL);
             CREATE TABLE IF NOT EXISTS attention (
               channel TEXT PRIMARY KEY, revision INTEGER NOT NULL DEFAULT 0,
               seen INTEGER NOT NULL DEFAULT 0, last_check REAL NOT NULL,
@@ -72,6 +76,9 @@ class Store:
         ''')
         self._migrate_columns()
         self._migrate_schedule()
+        for (channel,) in self.db.execute("SELECT channel FROM memory_schedule").fetchall():
+            if self.memory_path(channel).exists() and self.memory_needs_rebuild(channel):
+                self.request_memory_rebuild(channel)
 
     def _migrate_columns(self):
         with self.db:
@@ -81,6 +88,8 @@ class Store:
             columns = {row[1] for row in self.db.execute('PRAGMA table_info(memory_runs)')}
             if 'through' not in columns:
                 self.db.execute('ALTER TABLE memory_runs ADD COLUMN through REAL')
+            if 'revision' not in columns:
+                self.db.execute('ALTER TABLE memory_runs ADD COLUMN revision INTEGER NOT NULL DEFAULT 0')
             columns = {row[1] for row in self.db.execute('PRAGMA table_info(deliveries)')}
             for key in ('kind', 'emoji'):
                 if key not in columns:
@@ -215,6 +224,21 @@ class Store:
             if now >= max(deadline, retry or 0):
                 due.append(channel)
         return due
+
+    def memory_needs_rebuild(self, channel):
+        row = self.db.execute('SELECT revision FROM memory_runs WHERE channel=?', (str(channel),)).fetchone()
+        return (not row or row[0] != MEMORY_REVISION or bool(self.db.execute(
+            'SELECT 1 FROM memory_rebuilds WHERE channel=?', (str(channel),)).fetchone()))
+
+    def request_memory_rebuild(self, channel):
+        now = self.clock()
+        with self.db:
+            self.db.execute('INSERT INTO memory_rebuilds VALUES (?,?) ON CONFLICT(channel) DO UPDATE SET requested=excluded.requested',
+                            (str(channel), now))
+            self.db.execute('''INSERT INTO memory_schedule VALUES (?,?,?,NULL,NULL)
+                ON CONFLICT(channel) DO UPDATE SET pending_since=COALESCE(memory_schedule.pending_since,excluded.pending_since)''',
+                            (str(channel), now, now))
+            self.db.execute('INSERT OR IGNORE INTO memory_forced VALUES (?)', (str(channel),))
 
     def memory_failed(self, channel, retry_minutes=30):
         with self.db:
@@ -399,12 +423,23 @@ class Store:
         row = self.db.execute('SELECT MAX(id) FROM interactions WHERE channel=?', (str(channel),)).fetchone()
         return row[0] or 0
 
-    def archive(self, channel):
+    def archive(self, channel, include_retractions=False):
         """Full-refresh input: current versions of all messages encountered in
         successful runs, plus every standing remember/forget note."""
         body = '[Archive note: These are messages encountered during successful participation. '
         body += 'The archive may omit intervening conversation; timestamps and message IDs identify each message.]\n\n'
         body += transcript(Window(self._live(channel, self._archived_ids(channel))))
+        # A full rebuild also needs pending retractions; otherwise old memory
+        # could retain facts whose sources no longer appear in the live archive.
+        deleted = []
+        for message_id in sorted(self._archived_ids(channel)) if include_retractions else ():
+            row = self.db.execute('SELECT body FROM messages WHERE channel=? AND id=? AND deleted=1 AND body!=?',
+                                  (str(channel), message_id, '{}')).fetchone()
+            if row:
+                deleted.append(Message(**json.loads(row[0])))
+        if deleted:
+            body += ('\n\n<deleted_messages note="Remove anything remembered only because of these deleted messages.">\n'
+                     + transcript(Window(deleted)) + '\n</deleted_messages>')
         reactions = self.reactions(channel, self._archived_ids(channel))
         if reactions:
             body += '\n\n<reactions>\n' + reactions + '\n</reactions>'
@@ -466,13 +501,17 @@ class Store:
                 fromfile='MEMORY.previous.md', tofile='MEMORY.md', lineterm='')))
         self._atomic(path.with_name('memory-provenance.json'), json.dumps({'through_interaction': interaction_id}))
         with self.db:
-            self.db.execute('INSERT INTO memory_runs VALUES (?,?,?) ON CONFLICT(channel) DO UPDATE SET interaction_id=excluded.interaction_id,through=excluded.through',
-                            (str(channel), interaction_id, through))
+            self.db.execute('INSERT INTO memory_runs(channel,interaction_id,through,revision) VALUES (?,?,?,?) ON CONFLICT(channel) DO UPDATE SET interaction_id=excluded.interaction_id,through=excluded.through,revision=excluded.revision',
+                            (str(channel), interaction_id, through, MEMORY_REVISION))
             self.db.executemany('UPDATE memory_notes SET applied=1 WHERE id=?', [(i,) for i in note_ids])
             # Memory has now seen these retractions; the text itself goes.
             self.db.execute("UPDATE messages SET body='{}' WHERE channel=? AND deleted=1 AND changed<=?", (str(channel), through))
             self.db.execute('UPDATE memory_schedule SET pending_since=NULL,last_success=?,retry_after=NULL WHERE channel=?', (self.clock(), str(channel)))
-            self.db.execute('DELETE FROM memory_forced WHERE channel=?', (str(channel),))
+            self.db.execute('DELETE FROM memory_rebuilds WHERE channel=? AND requested<=?', (str(channel), through))
+            if self.db.execute('SELECT 1 FROM memory_rebuilds WHERE channel=?', (str(channel),)).fetchone():
+                self.db.execute('UPDATE memory_schedule SET pending_since=? WHERE channel=?', (self.clock(), str(channel)))
+            else:
+                self.db.execute('DELETE FROM memory_forced WHERE channel=?', (str(channel),))
         if event is not None and event['kind'] == 'memory':
             event['outputs']['notes_applied'] = len(note_ids)
 

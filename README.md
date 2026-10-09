@@ -63,6 +63,10 @@ credentials or network calls:
 ./bin/run-rowan --activity --memory-diffs
 ```
 
+Send `@Bot memory rebuild` (with a real mention) to silently queue a full memory
+rebuild without a conversation turn. Existing memories also rebuild once after a
+memory-writer revision changes.
+
 Memory diffs are shown only when requested. Activity stays in SQLite after job
 files expire; older jobs have unknown origin and token usage.
 
